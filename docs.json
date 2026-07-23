@@ -1,7 +1,7 @@
 {
   "$schema": "https://mintlify.com/docs.json",
-  "theme": "luma",
-  "name": "CTF Writeups",
+  "theme": "maple",
+  "name": "CTF - Lumixy Writeups",
   "colors": {
     "primary": "#ef7025",
     "light": "#eec9bc",
@@ -19,6 +19,7 @@
             "groups": [
               {
                 "group": "Overview",
+                "expanded": false,
                 "pages": [
                   "introduction",
                   "how-to-use",
@@ -27,6 +28,7 @@
               },
               {
                 "group": "Setup",
+                "expanded": false,
                 "pages": [
                   "setup/environment",
                   "setup/tools"
@@ -39,6 +41,7 @@
             "groups": [
               {
                 "group": "Web Exploitation",
+                "expanded": false,
                 "pages": [
                   "writeups/web/overview",
                   "writeups/web/sql-injection",
@@ -48,6 +51,7 @@
               },
               {
                 "group": "Cryptography",
+                "expanded": false,
                 "pages": [
                   "writeups/crypto/overview",
                   "writeups/crypto/rsa",
@@ -57,6 +61,7 @@
               },
               {
                 "group": "Binary Exploitation",
+                "expanded": false,
                 "pages": [
                   "writeups/pwn/overview",
                   "writeups/pwn/buffer-overflow",
@@ -65,6 +70,7 @@
               },
               {
                 "group": "Forensics",
+                "expanded": false,
                 "pages": [
                   "writeups/forensics/overview",
                   "writeups/forensics/steganography",
@@ -73,6 +79,7 @@
               },
               {
                 "group": "Miscellaneous",
+                "expanded": false,
                 "pages": [
                   "writeups/misc/overview",
                   "writeups/misc/osint",
@@ -85,12 +92,50 @@
             "tab": "LITCTF",
             "groups": [
               {
-                "group": "crypto",
+                "group": "cryptography (6/10)",
+                "icon": "bitcoin",
+                "tag": "crypto",
+                "expanded": false,
                 "pages": [
                   "untitled-page",
                   "zzz",
                   "rsa-improved",
                   "geometry-is-fun"
+                ]
+              },
+              {
+                "group": "reverse (6/8)",
+                "icon": "arrows-rotate-reverse",
+                "tag": "re",
+                "expanded": false,
+                "pages": [
+                  "yarn",
+                  "evaluation",
+                  "shuffle",
+                  "loading",
+                  "trampoline"
+                ]
+              },
+              {
+                "group": "miscellinous",
+                "icon": "mix",
+                "tag": "misc",
+                "pages": []
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "language": "vi",
+        "tabs": [
+          {
+            "tab": "Bắt đầu",
+            "groups": [
+              {
+                "group": "Tổng quan",
+                "pages": [
+                  "vi/introduction"
                 ]
               }
             ]
@@ -104,9 +149,20 @@
       "type": "button",
       "label": "Browse Writeups",
       "href": "/writeups/web/overview"
-    }
+    },
+    "links": []
   },
   "footer": {
     "socials": {}
+  },
+  "description": "ctf writeups",
+  "icons": {
+    "library": "fontawesome"
+  },
+  "background": {
+    "decoration": "gradient"
+  },
+  "metadata": {
+    "timestamp": true
   }
 }

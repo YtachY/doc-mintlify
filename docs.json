@@ -1,7 +1,7 @@
 {
   "$schema": "https://mintlify.com/docs.json",
-  "theme": "luma",
-  "name": "CTF Writeups",
+  "theme": "maple",
+  "name": "CTF - Lumixy Writeups",
   "colors": {
     "primary": "#ef7025",
     "light": "#eec9bc",
@@ -9,84 +9,135 @@
   },
   "favicon": "/favicon.svg",
   "navigation": {
-    "tabs": [
+    "languages": [
       {
-        "tab": "Getting Started",
-        "groups": [
+        "language": "en",
+        "default": true,
+        "tabs": [
           {
-            "group": "Overview",
-            "pages": [
-              "introduction",
-              "how-to-use",
-              "contributing"
+            "tab": "Getting Started",
+            "groups": [
+              {
+                "group": "Overview",
+                "expanded": false,
+                "pages": [
+                  "introduction",
+                  "how-to-use",
+                  "contributing"
+                ]
+              },
+              {
+                "group": "Setup",
+                "expanded": false,
+                "pages": [
+                  "setup/environment",
+                  "setup/tools"
+                ]
+              }
             ]
           },
           {
-            "group": "Setup",
-            "pages": [
-              "setup/environment",
-              "setup/tools"
+            "tab": "Writeups",
+            "groups": [
+              {
+                "group": "Web Exploitation",
+                "expanded": false,
+                "pages": [
+                  "writeups/web/overview",
+                  "writeups/web/sql-injection",
+                  "writeups/web/xss",
+                  "writeups/web/ssrf"
+                ]
+              },
+              {
+                "group": "Cryptography",
+                "expanded": false,
+                "pages": [
+                  "writeups/crypto/overview",
+                  "writeups/crypto/rsa",
+                  "writeups/crypto/aes",
+                  "writeups/crypto/hashing"
+                ]
+              },
+              {
+                "group": "Binary Exploitation",
+                "expanded": false,
+                "pages": [
+                  "writeups/pwn/overview",
+                  "writeups/pwn/buffer-overflow",
+                  "writeups/pwn/rop-chains"
+                ]
+              },
+              {
+                "group": "Forensics",
+                "expanded": false,
+                "pages": [
+                  "writeups/forensics/overview",
+                  "writeups/forensics/steganography",
+                  "writeups/forensics/pcap-analysis"
+                ]
+              },
+              {
+                "group": "Miscellaneous",
+                "expanded": false,
+                "pages": [
+                  "writeups/misc/overview",
+                  "writeups/misc/osint",
+                  "writeups/misc/reverse-engineering"
+                ]
+              }
+            ]
+          },
+          {
+            "tab": "LITCTF",
+            "groups": [
+              {
+                "group": "cryptography (6/10)",
+                "icon": "bitcoin",
+                "tag": "crypto",
+                "expanded": false,
+                "pages": [
+                  "untitled-page",
+                  "zzz",
+                  "rsa-improved",
+                  "geometry-is-fun"
+                ]
+              },
+              {
+                "group": "reverse (6/8)",
+                "icon": "arrows-rotate-reverse",
+                "tag": "re",
+                "expanded": false,
+                "pages": [
+                  "yarn",
+                  "evaluation",
+                  "shuffle",
+                  "loading",
+                  "trampoline"
+                ]
+              },
+              {
+                "group": "miscellinous",
+                "icon": "mix",
+                "tag": "misc",
+                "pages": []
+              }
             ]
           }
         ]
       },
       {
-        "tab": "Writeups",
-        "groups": [
+        "language": "vi",
+        "tabs": [
           {
-            "group": "Web Exploitation",
-            "pages": [
-              "writeups/web/overview",
-              "writeups/web/sql-injection",
-              "writeups/web/xss",
-              "writeups/web/ssrf"
-            ]
-          },
-          {
-            "group": "Cryptography",
-            "pages": [
-              "writeups/crypto/overview",
-              "writeups/crypto/rsa",
-              "writeups/crypto/aes",
-              "writeups/crypto/hashing"
-            ]
-          },
-          {
-            "group": "Binary Exploitation",
-            "pages": [
-              "writeups/pwn/overview",
-              "writeups/pwn/buffer-overflow",
-              "writeups/pwn/rop-chains"
-            ]
-          },
-          {
-            "group": "Forensics",
-            "pages": [
-              "writeups/forensics/overview",
-              "writeups/forensics/steganography",
-              "writeups/forensics/pcap-analysis"
-            ]
-          },
-          {
-            "group": "Miscellaneous",
-            "pages": [
-              "writeups/misc/overview",
-              "writeups/misc/osint",
-              "writeups/misc/reverse-engineering"
-            ]
-          }
-        ]
-      },
-      {
-        "tab": "LITCTF",
-        "groups": [
-          {
-            "group": "crypto",
-            "pages": [
-              "untitled-page",
-              "zzz",
-              "rsa-improved",
-              "geometry-is-fun"
+            "tab": "Bắt đầu",
+            "groups": [
+              {
+                "group": "Tổng quan",
+                "pages": [
+                  "vi/introduction"
+                ]
+              }
             ]
           }
         ]
@@ -98,9 +149,20 @@
       "type": "button",
       "label": "Browse Writeups",
       "href": "/writeups/web/overview"
-    }
+    },
+    "links": []
   },
   "footer": {
     "socials": {}
+  },
+  "description": "ctf writeups",
+  "icons": {
+    "library": "fontawesome"
+  },
+  "background": {
+    "decoration": "gradient"
+  },
+  "metadata": {
+    "timestamp": true
   }
 }

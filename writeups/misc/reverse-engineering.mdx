@@ -89,19 +89,37 @@ chmod +x challenge && ./challenge
   <Step title="Re-implement the algorithm in Python">
     Once you understand the encoding or transformation the binary applies to your input, re-implement it in Python to recover the flag from the encoded ciphertext stored in the binary.
 
-    ```python
-    # After reversing the check function in Ghidra:
-    # flag[i] = input[i] XOR 0x42 + i
+    You can extract the ciphertext byte array directly from the binary once you know its offset and length from Ghidra:
 
-    ciphertext = [0x66, 0x6c, 0x61, 0x67, 0x7b, ...]  # extracted from binary
+    ```python
+    # Extract the encoded byte array from the binary at the offset Ghidra showed you
+    with open('challenge', 'rb') as f:
+        f.seek(0x3010)          # offset from Ghidra's listing view
+        ciphertext = list(f.read(19))   # length of the encoded region (including null terminator)
+
+    print("Ciphertext:", [hex(b) for b in ciphertext])
+    ```
+
+    Then reverse the transformation to recover the flag. Based on a Ghidra decompile showing `encoded[i] = (input[i] ^ 0x42) + i`:
+
+    ```python
+    # Reverse the encoding: flag[i] = (encoded[i] - i) ^ 0x42
+    # Ciphertext extracted from offset 0x3010 in the binary:
+    ciphertext = [0x24, 0x2f, 0x25, 0x28, 0x3d, 0x2c, 0x29, 0x38,
+                  0x43, 0x26, 0x3a, 0x32, 0x40, 0x34, 0x3e, 0x40,
+                  0x37, 0x50, 0x00]
 
     flag = ''
     for i, c in enumerate(ciphertext):
-        flag += chr((c - i) ^ 0x42)
-    print(flag)
+        decoded = (c - i) ^ 0x42
+        if decoded == 0:
+            break
+        flag += chr(decoded)
+
+    print(flag)   # flag{easy_reverse}
     ```
 
-    Extract the encoded byte array from Ghidra's listing view or from the binary directly using Python's `open(..., 'rb')`. Run the script and check whether the output matches the expected flag format. If it's close but garbled, double-check the order of operations — XOR and arithmetic precedence in the decompiler pseudocode are common sources of off-by-one errors.
+    Run the script and check whether the output matches the expected flag format. If it's close but garbled, double-check the order of operations — XOR and arithmetic precedence in decompiler pseudocode are common sources of off-by-one errors. Try swapping `(c - i) ^ 0x42` and `(c ^ 0x42) - i` and comparing outputs.
   </Step>
 
   <Step title="Patch the binary to bypass the check">

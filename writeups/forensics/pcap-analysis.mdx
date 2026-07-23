@@ -46,7 +46,7 @@ In Wireshark:
 3. Read the full request and response; look for flag patterns, credentials, or Base64 blobs
 4. Use the **Find** box at the bottom of the stream window to search for `flag{`
 
-```
+```wireshark
 # Wireshark display filter to isolate HTTP traffic
 http
 
@@ -236,7 +236,7 @@ for flow, data in streams.items():
 ## Common Wireshark Filters Reference
 
 <Accordion title="Protocol Filters">
-```
+```wireshark
 # Show only HTTP traffic
 http
 
@@ -261,7 +261,7 @@ icmp
 </Accordion>
 
 <Accordion title="Content Search Filters">
-```
+```wireshark
 # Search for literal string in any packet
 frame contains "flag{"
 
@@ -280,7 +280,7 @@ frame[0:4] == 89:50:4e:47
 </Accordion>
 
 <Accordion title="IP and Port Filters">
-```
+```wireshark
 # Filter by source IP
 ip.src == 192.168.1.100
 
@@ -304,7 +304,7 @@ tcp.port == 4444
 </Accordion>
 
 <Accordion title="Stream and Session Filters">
-```
+```wireshark
 # Filter by TCP stream index (0-based)
 tcp.stream eq 0
 
@@ -323,7 +323,7 @@ http.request.method == "PUT" || http.request.method == "POST"
 </Accordion>
 
 <Accordion title="TLS and Encryption Filters">
-```
+```wireshark
 # Show TLS handshakes
 tls.handshake
 

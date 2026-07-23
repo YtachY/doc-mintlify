@@ -50,12 +50,12 @@ Follow this structured workflow for every OSINT challenge. The order matters —
 
     ```
     site:pastebin.com "CTF_USERNAME"
-    filetype:pdf "flag{"
+    site:github.com "flag{" "CTF_CHALLENGE_NAME"
     inurl:admin site:target.com
-    cache:target.com/secret
+    intitle:"index of" site:target.com
     ```
 
-    Combine operators for tighter targeting. `site:` restricts results to a specific domain, `filetype:` finds specific document types, `inurl:` matches text in the URL itself, and `cache:` retrieves Google's cached copy of a page — useful if the live version has been removed.
+    Combine operators for tighter targeting. `site:` restricts results to a specific domain, `filetype:` finds specific document types, `inurl:` matches text in the URL itself, and `intitle:` matches against the page title — useful for finding open directory listings that may expose challenge files or artifacts.
 
     <Tip>
     Try wrapping the exact challenge username or alias in quotes and searching without any operators first. Sometimes a single direct hit surfaces the answer before you need to reach for dorking.
@@ -69,19 +69,31 @@ Follow this structured workflow for every OSINT challenge. The order matters —
     import requests
 
     username = "ctf_player_name"
+    headers = {"User-Agent": "Mozilla/5.0 (compatible; CTF-OSINT/1.0)"}
+
     sites = [
         "https://github.com/{}",
-        "https://twitter.com/{}",
         "https://pastebin.com/u/{}",
-        "https://reddit.com/user/{}",
+        "https://reddit.com/user/{}.json",
+        "https://keybase.io/{}",
+        "https://dev.to/{}",
     ]
 
-    for site in sites:
-        url = site.format(username)
-        r = requests.get(url, timeout=5)
-        if r.status_code == 200:
-            print(f"[+] Found: {url}")
+    for template in sites:
+        url = template.format(username)
+        try:
+            r = requests.get(url, headers=headers, timeout=5, allow_redirects=True)
+            if r.status_code == 200:
+                print(f"[+] Found: {url}")
+            elif r.status_code == 404:
+                print(f"[-] Not found: {url}")
+        except requests.RequestException as e:
+            print(f"[!] Error for {url}: {e}")
     ```
+
+    <Note>
+    A `200` response doesn't always mean the account exists — some platforms return `200` for "user not found" pages. Always open confirmed hits in a browser to verify the account is real and active. The Reddit `.json` endpoint is reliable: it returns `404` for non-existent users and genuine JSON for real ones.
+    </Note>
 
     Tools like [Sherlock](https://github.com/sherlock-project/sherlock) and [Maigret](https://github.com/soxoj/maigret) automate this across hundreds of platforms. Run them first, then follow up manually on any hits.
   </Step>
@@ -107,7 +119,13 @@ Follow this structured workflow for every OSINT challenge. The order matters —
 
     Pay attention to the snapshot calendar — the dates of available captures can themselves be a clue. If captures suddenly stop, something was likely taken down intentionally. Check the last few snapshots before the gap.
 
-    Also try Google's cache directly by prefixing the URL with `cache:` in a search query, and check `cachedview.nl` and `archive.ph` as alternative caching services.
+    Also check `archive.ph` and `cachedview.nl` as alternative caching services. You can query the Wayback Machine's CDX API programmatically to list all snapshots for a URL:
+
+    ```bash
+    curl "http://web.archive.org/cdx/search/cdx?url=target.com/secret&output=text&fl=timestamp,statuscode"
+    ```
+
+    This returns every snapshot ever taken for that path, along with the HTTP status code at capture time — a quick way to confirm a page existed and when it disappeared.
   </Step>
 </Steps>
 
@@ -146,7 +164,7 @@ Google search operators unlock results that standard queries miss. Combine them 
 | `filetype:` | `filetype:pdf "confidential"` | Find files of a specific type |
 | `inurl:` | `inurl:backup site:target.com` | Match text in the URL |
 | `intitle:` | `intitle:"index of" passwords` | Match text in the page title |
-| `cache:` | `cache:target.com/page` | Retrieve Google's cached version |
+| `before:` / `after:` | `before:2023-01-01 site:target.com` | Filter results by date range |
 | `"exact phrase"` | `"flag{" site:pastebin.com` | Require an exact string match |
 | `-term` | `target.com -www` | Exclude pages containing a term |
 
@@ -170,7 +188,7 @@ Some Google dork queries — particularly those targeting login pages or exposed
   **Metadata Extraction**
   - `exiftool` — extracts metadata from images, PDFs, Office documents, and audio files
   - `mat2` — strips metadata (useful for understanding what _would_ be present)
-  - [Jeffrey's Exif Viewer](http://exif.regex.info/exif.cgi) — web-based EXIF viewer with GPS map integration
+  - [Jeffrey's Exif Viewer](https://exif.regex.info/exif.cgi) — web-based EXIF viewer with GPS map integration
 
   **Infrastructure and Domain Research**
   - [Shodan](https://shodan.io) — search engine for internet-connected devices and services
@@ -181,7 +199,7 @@ Some Google dork queries — particularly those targeting login pages or exposed
   **Cached and Archived Content**
   - [Wayback Machine](https://web.archive.org) — historical snapshots of web pages
   - [archive.ph](https://archive.ph) — on-demand page archiving and retrieval
-  - `cache:` Google operator — retrieve Google's most recent cached copy
+  - `before:`/`after:` Google operators — filter results by publication date range
 
   **Geolocation**
   - [Google Maps](https://maps.google.com) — paste GPS coordinates directly into the search bar

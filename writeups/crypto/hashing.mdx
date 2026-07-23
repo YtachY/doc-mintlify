@@ -1,7 +1,7 @@
 ---
 title: "Hash Cracking CTF Writeup: MD5, SHA, and Length Extension"
 sidebarTitle: "Hashing"
-description: "Hash-based CTF challenge walkthrough: crack MD5/SHA hashes with hashcat and John the Ripper, exploit hash length extension attacks, and bypass hash comparisons."
+description: "CTF hash challenge walkthrough: crack MD5/SHA with hashcat and John, exploit length extension attacks, and bypass PHP type-juggling hash comparisons."
 ---
 
 Hash challenges in CTFs come in two distinct flavours. The first is pure cracking: you're given a hash digest and you need to find the original input, usually a password or short string. The second is exploitation: the application uses a hash as a security primitive — a MAC, a signature, or an authentication token — and there's a structural flaw in how it was constructed. Both categories appear constantly, and your approach to each is completely different. This walkthrough covers the full spectrum, from firing up `hashcat` to crafting a length extension payload against a server-side MAC.
@@ -152,7 +152,7 @@ john --wordlist=rockyou.txt zip.hash
 
 This is the most technically interesting hash attack you'll encounter in CTFs. Many applications compute a MAC like this:
 
-```
+```text
 MAC = H(secret || message)
 ```
 
@@ -274,9 +274,9 @@ PHP and other loosely typed languages introduce their own class of hash vulnerab
                   return candidate
 
   # Known magic hashes (use these directly in CTFs):
-  # "240610708"  -> md5 = 0e462097431906509019562988736854
-  # "QNKCDZO"   -> md5 = 0e830400451993494058024219903391
-  # "aabg74469"  -> sha1 = 0e00910840285373189535044251390$
+  # "240610708"    -> md5  = 0e462097431906509019562988736854
+  # "QNKCDZO"     -> md5  = 0e830400451993494058024219903391
+  # "10932435112" -> sha1 = 0e07766915004133176347055865026311692244
   ```
 </Accordion>
 

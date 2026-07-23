@@ -260,7 +260,7 @@ ECB mode is the only common AES mode where encrypting identical plaintext blocks
   <Tab title="CTR Keystream Reuse">
     CTR (Counter) mode turns AES into a stream cipher: it encrypts successive counter values and XORs the result with plaintext. This is perfectly secure as long as the `(key, nonce)` pair is never reused. If two different plaintexts are encrypted with the same keystream, XORing the ciphertexts cancels the keystream out:
 
-    ```
+    ```text
     c1 = p1 XOR keystream
     c2 = p2 XOR keystream
     c1 XOR c2 = p1 XOR p2

@@ -1,7 +1,7 @@
 ---
-title: "Essential CTF Tools and How to Install Them"
+title: "Install and Configure Essential CTF Competition Tools"
 sidebarTitle: "Tools"
-description: "Install and configure the most important CTF tools including pwntools, Burp Suite, Ghidra, Wireshark, and John the Ripper."
+description: "Install and configure the most important CTF tools including pwntools, Burp Suite, Ghidra, Wireshark, John the Ripper, and more — organized by category."
 ---
 
 Every CTF category demands a different toolkit, and hunting for installers mid-competition is a fast way to lose hours you could have spent on the actual challenges. This page walks you through installing and verifying the tools you'll reach for most often, organized by category so you can set up only what you need or work through the whole page before a competition to arrive fully equipped.
@@ -221,6 +221,7 @@ Run the following snippet to confirm pwntools is installed correctly and can per
 
 ```python
 #!/usr/bin/env python3
+import pwnlib
 from pwn import *
 
 # Check the version
@@ -258,6 +259,147 @@ python3 verify_pwntools.py
 
 ---
 
+## Reverse Engineering
+
+Reverse engineering (RE) challenges ask you to analyse compiled binaries, firmware, or bytecode to understand what a program does and extract flags hidden in its logic. Ghidra is the de facto open-source tool for this work.
+
+<Tabs>
+  <Tab title="Linux">
+    **Install Ghidra**
+
+    Ghidra requires Java 17 or later. Install the JDK first, then download and extract Ghidra from the official NSA GitHub releases page.
+
+    ```bash apt
+    # Install Java 17 JDK
+    sudo apt install -y openjdk-17-jdk
+    ```
+
+    ```bash manual
+    # Download the latest Ghidra release (check https://github.com/NationalSecurityAgency/ghidra/releases)
+    wget https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_11.1.2_build/ghidra_11.1.2_PUBLIC_20240709.zip
+    unzip ghidra_11.1.2_PUBLIC_20240709.zip -d ~/tools/
+    ln -s ~/tools/ghidra_11.1.2_PUBLIC/ghidraRun ~/bin/ghidra
+    ```
+
+    ```bash
+    # Launch Ghidra
+    ghidra
+    ```
+
+    <Tip>
+      When you open a binary in Ghidra for the first time, let the auto-analysis run to completion before exploring. It resolves function signatures, identifies strings, and marks up cross-references — saving you significant manual effort.
+    </Tip>
+  </Tab>
+  <Tab title="macOS">
+    ```bash brew
+    # Install Java 17 JDK
+    brew install openjdk@17
+
+    # Install Ghidra
+    brew install --cask ghidra
+    ```
+
+    ```bash
+    # Launch Ghidra
+    ghidra
+    ```
+  </Tab>
+</Tabs>
+
+**Useful Ghidra workflow for CTF RE challenges**
+
+```bash
+# 1. Identify the binary type before opening in Ghidra
+file challenge_binary
+# challenge_binary: ELF 64-bit LSB executable, x86-64, stripped
+
+# 2. Check security mitigations
+checksec --file=challenge_binary
+
+# 3. Find interesting strings before full decompilation
+strings -n 8 challenge_binary | grep -i "flag\|ctf\|key\|pass"
+```
+
+---
+
+## Password Cracking
+
+Password cracking challenges present you with hashed credentials or encrypted archives. John the Ripper and Hashcat are the two most widely used tools — John excels at versatility and format auto-detection, while Hashcat leverages GPU acceleration for speed.
+
+<Tabs>
+  <Tab title="Linux">
+    <CodeGroup>
+      ```bash apt
+      # John the Ripper (community jumbo build with extra format support)
+      sudo apt install -y john
+
+      # Hashcat — GPU-accelerated password recovery
+      sudo apt install -y hashcat
+      ```
+
+      ```bash manual
+      # Build John the Ripper jumbo from source for the latest formats
+      sudo apt install -y build-essential libssl-dev
+      git clone https://github.com/openwall/john.git ~/tools/john
+      cd ~/tools/john/src && ./configure && make -s clean && make -sj4
+      echo 'export PATH="$HOME/tools/john/run:$PATH"' >> ~/.bashrc
+      source ~/.bashrc
+      ```
+    </CodeGroup>
+
+    **Verify the installs**
+
+    ```bash
+    john --list=formats | head -5     # lists supported hash formats
+    hashcat --version                 # hashcat v6.x.x
+    ```
+
+    **Common cracking one-liners**
+
+    ```bash
+    # Identify a hash type before cracking
+    john --list=formats | grep -i md5
+
+    # Crack an MD5 hash with rockyou
+    echo "5f4dcc3b5aa765d61d8327deb882cf99" > hash.txt
+    john --format=raw-md5 --wordlist=/usr/share/wordlists/rockyou.txt hash.txt
+
+    # Extract and crack a ZIP password with zip2john
+    zip2john protected.zip > zip_hash.txt
+    john --wordlist=/usr/share/wordlists/rockyou.txt zip_hash.txt
+
+    # GPU-accelerated MD5 cracking with Hashcat
+    hashcat -m 0 -a 0 hash.txt /usr/share/wordlists/rockyou.txt
+    ```
+
+    <Note>
+      On a fresh Kali install the rockyou wordlist is compressed. Decompress it once with `sudo gunzip /usr/share/wordlists/rockyou.txt.gz` before use.
+    </Note>
+  </Tab>
+  <Tab title="macOS">
+    <CodeGroup>
+      ```bash brew
+      # John the Ripper
+      brew install john-jumbo
+
+      # Hashcat
+      brew install hashcat
+      ```
+    </CodeGroup>
+
+    ```bash
+    john --list=formats | head -5
+    hashcat --version
+    ```
+
+    <Warning>
+      Hashcat GPU acceleration on macOS uses Metal rather than CUDA. Performance is significantly lower than a dedicated NVIDIA GPU. For serious cracking workloads, use a Linux machine with a discrete GPU or a cloud cracking instance.
+    </Warning>
+  </Tab>
+</Tabs>
+
+---
+
 ## Forensics
 
 Forensics challenges hand you disk images, packet captures, steganography puzzles, and memory dumps. The tools below let you extract, analyze, and reconstruct hidden data.
@@ -279,7 +421,7 @@ Forensics challenges hand you disk images, packet captures, steganography puzzle
       sudo apt install -y steghide
 
       # exiftool — read and write EXIF metadata in images and documents
-      sudo apt install -y exiftool
+      sudo apt install -y libimage-exiftool-perl
 
       # foremost — carve files from raw disk images based on headers
       sudo apt install -y foremost
@@ -441,7 +583,8 @@ sudo apt install -y \
   burpsuite sqlmap ffuf curl \
   openssl sagemath \
   gdb checksec patchelf binutils \
-  wireshark tshark autopsy binwalk steghide exiftool foremost \
+  openjdk-17-jdk john hashcat \
+  wireshark tshark autopsy binwalk steghide libimage-exiftool-perl foremost \
   python3 python3-pip netcat-openbsd git xxd
 
 echo "[*] Installing Python packages..."

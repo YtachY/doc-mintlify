@@ -1,5 +1,5 @@
 ---
-title: "RSA CTF Writeup: Factoring Weak Keys and Attacks"
+title: "RSA CTF Writeup: Factoring Weak Keys and Exploiting Flaws"
 sidebarTitle: "RSA"
 description: "RSA CTF challenge walkthrough covering small exponent attacks, common modulus, Wiener's attack, and factoring with RsaCtfTool and SageMath."
 ---
@@ -164,8 +164,8 @@ Always start by inspecting the numbers. Print the bit length of `n`, check wheth
             discriminant = b * b - 4 * n
             if discriminant >= 0:
                 import gmpy2
-                sqrt_disc, exact = gmpy2.isqrt_rem(discriminant)
-                if exact == 0:
+                sqrt_disc, remainder = gmpy2.isqrt_rem(discriminant)
+                if remainder == 0:  # discriminant is a perfect square
                     return d
         return None
 
@@ -303,6 +303,7 @@ For challenges that require lattice-based attacks (Coppersmith's method, partial
 ```python
 # SageMath: Coppersmith's attack for small message with known high bits
 # Run inside a SageMath environment or sage script
+from Crypto.Util.number import long_to_bytes
 
 n = Integer(0xdeadbeef)  # modulus
 e = Integer(65537)
@@ -313,14 +314,14 @@ c = Integer(0xcafebabe)  # ciphertext
 # Coppersmith finds small roots of f mod n
 
 R.<x> = PolynomialRing(Zmod(n))
-m_high = Integer(0xflag000000000000)  # known upper bits
+m_high = Integer(0xdeadbeef00000000)  # replace with known high bits of m (e.g. from flag prefix)
 f = (m_high + x)^e - c
 
 # small_roots finds x such that f(x) = 0 mod n, |x| < n^(1/e)
 roots = f.small_roots(X=2^32, beta=1)
 for r in roots:
-    m = m_high + r
-    print(bytes.fromhex(hex(m)[2:]))
+    m = int(m_high + r)
+    print(long_to_bytes(m))
 ```
 
 ## Quick Reference

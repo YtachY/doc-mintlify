@@ -76,6 +76,20 @@
             ]
           }
         ]
+      },
+      {
+        "tab": "LITCTF",
+        "groups": [
+          {
+            "group": "crypto",
+            "pages": [
+              "untitled-page",
+              "zzz",
+              "rsa-improved",
+              "geometry-is-fun"
+            ]
+          }
+        ]
       }
     ]
   },

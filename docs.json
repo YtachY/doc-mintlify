@@ -9,10 +9,12 @@
   },
   "favicon": "/favicon.svg",
   "navigation": {
-    "languages": [
+    "dropdowns": [
       {
-        "language": "en",
-        "default": true,
+        "dropdown": "2021bak"
+      },
+      {
+        "dropdown": "Home",
         "tabs": [
           {
             "tab": "Getting Started",
@@ -87,55 +89,82 @@
                 ]
               }
             ]
-          },
-          {
-            "tab": "LITCTF",
-            "groups": [
-              {
-                "group": "cryptography (6/10)",
-                "icon": "bitcoin",
-                "tag": "crypto",
-                "expanded": false,
-                "pages": [
-                  "untitled-page",
-                  "zzz",
-                  "rsa-improved",
-                  "geometry-is-fun"
-                ]
-              },
-              {
-                "group": "reverse (6/8)",
-                "icon": "arrows-rotate-reverse",
-                "tag": "re",
-                "expanded": false,
-                "pages": [
-                  "yarn",
-                  "evaluation",
-                  "shuffle",
-                  "loading",
-                  "trampoline"
-                ]
-              },
-              {
-                "group": "miscellinous",
-                "icon": "mix",
-                "tag": "misc",
-                "pages": []
-              }
-            ]
           }
         ]
       },
       {
-        "language": "vi",
-        "tabs": [
+        "dropdown": "2021",
+        "products": [
           {
-            "tab": "Bắt đầu",
-            "groups": [
+            "product": "LITCTF",
+            "languages": [
               {
-                "group": "Tổng quan",
+                "language": "en",
+                "default": true,
+                "tabs": [
+                  {
+                    "tab": "LITCTF",
+                    "groups": [
+                      {
+                        "group": "cryptography (6/10)",
+                        "icon": "bitcoin",
+                        "tag": "crypto",
+                        "expanded": false,
+                        "pages": [
+                          "untitled-page",
+                          "zzz",
+                          "rsa-improved",
+                          "geometry-is-fun"
+                        ]
+                      },
+                      {
+                        "group": "reverse (6/8)",
+                        "icon": "arrows-rotate-reverse",
+                        "tag": "re",
+                        "expanded": false,
+                        "pages": [
+                          "yarn",
+                          "evaluation",
+                          "shuffle",
+                          "loading",
+                          "trampoline"
+                        ]
+                      },
+                      {
+                        "group": "miscellinous",
+                        "icon": "mix",
+                        "tag": "misc",
+                        "pages": []
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "language": "vi",
+                "tabs": [
+                  {
+                    "tab": "Bắt đầu",
+                    "groups": [
+                      {
+                        "group": "Tổng quan",
+                        "pages": [
+                          "vi/introduction"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "product": "HCTF",
+            "tabs": [
+              {
+                "tab": "reverse",
                 "pages": [
-                  "vi/introduction"
+                  "sample"
                 ]
               }
             ]

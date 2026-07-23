@@ -1,0 +1,336 @@
+---
+title: "RSA CTF Writeup: Factoring Weak Keys and Attacks"
+sidebarTitle: "RSA"
+description: "RSA CTF challenge walkthrough covering small exponent attacks, common modulus, Wiener's attack, and factoring with RsaCtfTool and SageMath."
+---
+
+RSA is the most common asymmetric cipher you'll encounter in CTF cryptography challenges, and almost every RSA challenge is won the same way: you find a parameter that's too small, a relationship between values that shouldn't exist, or a shortcut the challenge author took to make the problem solvable. You never break RSA itself — you break the way it was set up. This walkthrough takes you through the most common attack classes, from a basic factoring check all the way through multi-key attacks, with working Python code for each.
+
+## Challenge Setup
+
+A typical RSA challenge gives you some combination of the following:
+
+- `n` — the public modulus (product of two primes `p` and `q`)
+- `e` — the public exponent (commonly `65537`, but sometimes `3` or another small value)
+- `c` — the ciphertext (an integer: `c = m^e mod n`)
+- A `.pem` public key file
+- Sometimes: multiple `(n, e, c)` triples or the encryption script
+
+Your goal is to recover `m` (the plaintext message, usually a flag) by finding the private exponent `d` or by exploiting a structural weakness that lets you bypass the need for `d` entirely.
+
+<Note>
+Always start by inspecting the numbers. Print the bit length of `n`, check whether `e` is unusually small, and look for any values that appear in more than one set of parameters. These observations take thirty seconds and will immediately rule out most attacks — or confirm the right one.
+</Note>
+
+## Attack Workflow
+
+<Steps>
+  <Step title="Inspect the Parameters">
+    Load the key material and check the basics. A 512-bit or smaller modulus is almost certainly factorable. An exponent of `3` opens the door to cube-root attacks. Identical `n` values across different ciphertexts suggest a common modulus attack.
+
+    ```python
+    from Crypto.Util.number import long_to_bytes
+    import gmpy2
+
+    n = 0xdeadbeef  # replace with the actual modulus
+    e = 3
+    c = 0xcafebabe  # replace with the actual ciphertext
+
+    print(f"Modulus bit length: {n.bit_length()}")
+    print(f"Public exponent: {e}")
+    ```
+  </Step>
+
+  <Step title="Try Factoring the Modulus">
+    Before running any sophisticated attack, check whether `n` is already known to be factored. Submit it to [factordb.com](https://factordb.com) — many CTF moduli use pre-generated weak primes that have been catalogued there. If factordb doesn't have it, try `sympy` or `SageMath` for small moduli.
+
+    ```python
+    from sympy import factorint
+
+    # Works quickly for moduli up to ~512 bits with weak primes
+    factors = factorint(n)
+    print(factors)  # {p: 1, q: 1}
+    ```
+
+    Once you have `p` and `q`, computing the flag is straightforward:
+
+    ```python
+    from Crypto.Util.number import long_to_bytes
+
+    p = 0xdeadbeef  # first prime factor
+    q = n // p      # second prime factor
+    phi = (p - 1) * (q - 1)
+
+    d = pow(e, -1, phi)          # modular inverse of e mod phi
+    m = pow(c, d, n)             # decrypt: m = c^d mod n
+    print(long_to_bytes(m))
+    ```
+  </Step>
+
+  <Step title="Choose and Execute an Attack">
+    If the modulus doesn't factor easily, identify which structural attack applies based on the parameters you have. The tabs below cover each major attack class in detail.
+  </Step>
+
+  <Step title="Decode the Flag">
+    The recovered plaintext `m` is an integer. Convert it to bytes and look for your flag format (e.g., `CTF{...}`).
+
+    ```python
+    from Crypto.Util.number import long_to_bytes
+
+    flag = long_to_bytes(m)
+    print(flag)
+    ```
+  </Step>
+</Steps>
+
+## Attack Types
+
+<Tabs>
+  <Tab title="Small Exponent (e=3)">
+    When `e = 3` and the message `m` is small enough that `m^3 < n`, the modular reduction never activates — which means `c = m^3` exactly, with no modular arithmetic involved. You recover `m` by taking the integer cube root of `c`.
+
+    ```python
+    from Crypto.Util.number import long_to_bytes
+    import gmpy2
+
+    n = 0xdeadbeef  # modulus (not needed for this attack if m^3 < n)
+    e = 3
+    c = 0xcafebabe  # ciphertext
+
+    # Attempt integer cube root
+    m, exact = gmpy2.iroot(c, e)
+    if exact:
+        print("[+] Small exponent attack succeeded!")
+        print(long_to_bytes(m))
+    else:
+        print("[-] m^3 >= n — try adding multiples of n before taking the root")
+    ```
+
+    If the cube root isn't exact, `m^3` wrapped around `n`. Try the following: for `k` in a small range, check whether `gmpy2.iroot(c + k * n, 3)` is exact. This works when padding is minimal.
+
+    ```python
+    for k in range(10000):
+        m, exact = gmpy2.iroot(c + k * n, 3)
+        if exact:
+            flag = long_to_bytes(m)
+            if b'CTF' in flag or b'flag' in flag:
+                print(f"[+] Found with k={k}: {flag}")
+                break
+    ```
+
+    <Warning>
+      This attack only works when no proper padding (like OAEP) is applied. A well-padded RSA ciphertext is not vulnerable to simple cube-root recovery even with `e = 3`.
+    </Warning>
+  </Tab>
+
+  <Tab title="Wiener's Attack">
+    Wiener's attack exploits small private exponents (`d`). If `d < n^0.25 / 3`, the continued fraction expansion of `e/n` reveals `d` directly. This happens when challenge authors try to speed up decryption by choosing a small `d`.
+
+    ```python
+    from Crypto.Util.number import long_to_bytes
+
+    def wiener_attack(e, n):
+        """
+        Recover d using Wiener's continued fraction attack.
+        Returns d if successful, None otherwise.
+        """
+        def continued_fraction(num, den):
+            cf = []
+            while den:
+                cf.append(num // den)
+                num, den = den, num % den
+            return cf
+
+        def convergents(cf):
+            convs = []
+            for i in range(len(cf)):
+                if i == 0:
+                    convs.append((cf[0], 1))
+                elif i == 1:
+                    convs.append((cf[0]*cf[1]+1, cf[1]))
+                else:
+                    h_prev2, k_prev2 = convs[-2]
+                    h_prev1, k_prev1 = convs[-1]
+                    convs.append((cf[i]*h_prev1 + h_prev2, cf[i]*k_prev1 + k_prev2))
+            return convs
+
+        cf = continued_fraction(e, n)
+        for k, d in convergents(cf):
+            if k == 0:
+                continue
+            phi_candidate = (e * d - 1) // k
+            # Check if phi(n) is plausible: n - phi(n) + 1 should factor nicely
+            b = n - phi_candidate + 1
+            discriminant = b * b - 4 * n
+            if discriminant >= 0:
+                import gmpy2
+                sqrt_disc, exact = gmpy2.isqrt_rem(discriminant)
+                if exact == 0:
+                    return d
+        return None
+
+    n = 0xdeadbeef  # modulus
+    e = 0xcafebabe  # large public exponent (generated from small d)
+    c = 0xfeedface  # ciphertext
+
+    d = wiener_attack(e, n)
+    if d:
+        m = pow(c, d, n)
+        print(long_to_bytes(m))
+    else:
+        print("[-] Wiener's attack failed — d may not be small enough")
+    ```
+
+    <Tip>
+      In SageMath, you can use the built-in `continued_fraction` function and skip the manual implementation. SageMath's number theory toolkit makes this attack a five-liner.
+    </Tip>
+  </Tab>
+
+  <Tab title="Common Modulus">
+    If the same plaintext `m` is encrypted under the same modulus `n` but two different exponents `e1` and `e2` — and `gcd(e1, e2) == 1` — you can recover `m` without knowing either private key. This is the common modulus attack.
+
+    ```python
+    from Crypto.Util.number import long_to_bytes
+    from math import gcd
+
+    def extended_gcd(a, b):
+        if b == 0:
+            return a, 1, 0
+        g, x, y = extended_gcd(b, a % b)
+        return g, y, x - (a // b) * y
+
+    n  = 0xdeadbeef  # shared modulus
+    e1 = 65537
+    e2 = 65539
+    c1 = 0xcafebabe  # ciphertext under e1
+    c2 = 0xfeedface  # ciphertext under e2
+
+    assert gcd(e1, e2) == 1, "e1 and e2 must be coprime"
+
+    g, a, b = extended_gcd(e1, e2)
+    # a*e1 + b*e2 = 1, so c1^a * c2^b = m^(a*e1 + b*e2) = m^1 = m (mod n)
+
+    if a < 0:
+        c1 = pow(c1, -1, n)
+        a = -a
+    if b < 0:
+        c2 = pow(c2, -1, n)
+        b = -b
+
+    m = (pow(c1, a, n) * pow(c2, b, n)) % n
+    print(long_to_bytes(m))
+    ```
+
+    <Note>
+      This attack requires two encryptions of the **same plaintext** under the **same modulus**. If the plaintexts differ (e.g., due to random padding), the attack does not work.
+    </Note>
+  </Tab>
+
+  <Tab title="Broadcast Attack">
+    The broadcast attack (Håstad's attack) applies when the same message is encrypted with a small exponent `e` under `e` different moduli. If `e = 3` and you have three ciphertexts `c1, c2, c3` encrypted under `n1, n2, n3`, the Chinese Remainder Theorem recovers `m^3` over the integers, and a single cube root yields `m`.
+
+    ```python
+    from Crypto.Util.number import long_to_bytes
+    import gmpy2
+
+    e = 3
+
+    # Three ciphertexts of the same message under three different moduli
+    n1, c1 = 0xaaa, 0x111
+    n2, c2 = 0xbbb, 0x222
+    n3, c3 = 0xccc, 0x333
+
+    # Chinese Remainder Theorem
+    N = n1 * n2 * n3
+    N1, N2, N3 = N // n1, N // n2, N // n3
+
+    m1 = pow(N1, -1, n1)
+    m2 = pow(N2, -1, n2)
+    m3 = pow(N3, -1, n3)
+
+    x = (c1 * N1 * m1 + c2 * N2 * m2 + c3 * N3 * m3) % N
+
+    # x == m^3 over the integers — take the cube root
+    m, exact = gmpy2.iroot(x, e)
+    if exact:
+        print(long_to_bytes(m))
+    else:
+        print("[-] Cube root not exact — check inputs")
+    ```
+  </Tab>
+</Tabs>
+
+## Automating with RsaCtfTool
+
+When you're not sure which attack applies, or you want a quick sanity check before diving into manual exploitation, [RsaCtfTool](https://github.com/RsaCtfTool/RsaCtfTool) automates dozens of RSA attacks against a key or raw parameters.
+
+<CodeGroup>
+
+```bash From a PEM public key file
+# Try all known attacks and print the private key if found
+python RsaCtfTool.py --publickey pub.pem --private
+
+# Decrypt a ciphertext file using the best available attack
+python RsaCtfTool.py --publickey pub.pem --uncipherfile cipher.txt
+```
+
+```bash From raw parameters
+# Provide n, e, and ciphertext directly on the command line
+python RsaCtfTool.py -n <modulus> -e <exponent> --uncipher <ciphertext_as_int>
+
+# Specify a particular attack to run
+python RsaCtfTool.py -n <modulus> -e <exponent> --attack wiener
+
+# Try only fast attacks (useful for time-limited competitions)
+python RsaCtfTool.py --publickey pub.pem --attack fast_prime
+```
+
+```bash Multiple keys (common modulus)
+# Pass multiple public keys to detect shared moduli automatically
+python RsaCtfTool.py --publickey "*.pem" --private
+```
+
+</CodeGroup>
+
+<Tip>
+  RsaCtfTool queries factordb.com automatically. If your modulus is in the database, the tool recovers the flag without any further configuration. Run it first, then read the output to understand which attack succeeded before moving on.
+</Tip>
+
+## SageMath for Advanced Attacks
+
+For challenges that require lattice-based attacks (Coppersmith's method, partial key exposure), SageMath is your best option. It ships with everything you need.
+
+```python
+# SageMath: Coppersmith's attack for small message with known high bits
+# Run inside a SageMath environment or sage script
+
+n = Integer(0xdeadbeef)  # modulus
+e = Integer(65537)
+c = Integer(0xcafebabe)  # ciphertext
+
+# Suppose you know the top half of m (e.g., from a known flag prefix)
+# Set up the polynomial: f(x) = (m_high + x)^e - c (mod n)
+# Coppersmith finds small roots of f mod n
+
+R.<x> = PolynomialRing(Zmod(n))
+m_high = Integer(0xflag000000000000)  # known upper bits
+f = (m_high + x)^e - c
+
+# small_roots finds x such that f(x) = 0 mod n, |x| < n^(1/e)
+roots = f.small_roots(X=2^32, beta=1)
+for r in roots:
+    m = m_high + r
+    print(bytes.fromhex(hex(m)[2:]))
+```
+
+## Quick Reference
+
+| Condition | Attack |
+|---|---|
+| `n` ≤ 512 bits | Factor directly (sympy, factordb) |
+| `e = 3`, no padding | Integer cube root |
+| `e = 3`, multiple recipients | Håstad's broadcast attack |
+| Large `e`, small `d` | Wiener's attack |
+| Same `n`, two different `e` values | Common modulus attack |
+| Partial knowledge of `p` or `d` | Coppersmith / lattice methods |
+| No obvious math flaw | RsaCtfTool automated scan |

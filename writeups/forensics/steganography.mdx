@@ -1,0 +1,282 @@
+---
+title: "Steganography CTF Writeup: Flags Hidden in Images"
+sidebarTitle: "Steganography"
+description: "Steganography CTF walkthrough: extract hidden data from PNG, JPEG, and WAV files using steghide, zsteg, LSB analysis, and spectral analysis."
+---
+
+Steganography challenges hand you an ordinary-looking image or audio file and dare you to find what's hidden inside. The flag might be encoded in the least-significant bits of pixel color channels, appended as raw bytes after the file's closing marker, tucked into EXIF comment fields, or painted into an audio spectrogram visible only when you view the frequency domain. This walkthrough takes you from the very first `file` command through every major steganography technique you'll encounter in competition.
+
+## Challenge Setup
+
+You receive a file — let's call it `challenge.png` — and the prompt says nothing more than "find the flag." That's intentional. Part of the challenge is determining *how* the data is hidden before you can extract it. Resist the urge to jump straight to a single tool. Work through the reconnaissance phase first; it will tell you exactly which extraction technique to apply.
+
+<Steps>
+
+### Step 1: Initial Reconnaissance
+
+Before touching any steganography-specific tool, run the universal first-look checklist on the file. These commands take under ten seconds and frequently expose the flag outright, or at minimum narrow your search dramatically.
+
+```bash
+file challenge.png
+strings challenge.png | grep -i flag
+exiftool challenge.png
+binwalk challenge.png
+hexdump -C challenge.png | head -20
+```
+
+Pay close attention to the `binwalk` output. If it lists offsets beyond the PNG's `IEND` chunk, there is data appended after the image's legitimate end — a strong signal that file carving will recover something. Also read every field in the `exiftool` output; authors routinely stash flags in `Comment`, `Artist`, `Copyright`, and custom XMP fields.
+
+<Tip>
+  Check the file size against what an image of that resolution *should* weigh. A 100×100 PNG that is 2 MB instead of 20 KB almost certainly contains an embedded file or payload.
+</Tip>
+
+### Step 2: EXIF Metadata Analysis
+
+EXIF metadata is the fastest hiding place in the book and the first thing experienced competitors check. Run `exiftool` and scroll through every field.
+
+```bash
+exiftool challenge.png
+exiftool -all challenge.png
+exiftool -Comment challenge.jpg
+```
+
+Look for anything that stands out: Base64 strings in comment fields, unusually long copyright strings, GPS coordinates that decode to ASCII when converted, or a thumbnail image that differs from the main image. Extract thumbnails with:
+
+```bash
+exiftool -b -ThumbnailImage challenge.jpg > thumbnail.jpg
+file thumbnail.jpg
+```
+
+### Step 3: LSB Steganography in Images
+
+Least-significant-bit (LSB) steganography hides data by replacing the lowest-order bit of each color channel value with a bit from the secret message. Visually the change is imperceptible — a pixel value of `254` becomes `255` — but the hidden bitstream accumulates across thousands of pixels.
+
+<Tabs>
+  <Tab title="PNG — zsteg">
+    `zsteg` is purpose-built for PNG and BMP LSB analysis. The `-a` flag tries every combination of bit planes and channel orders automatically.
+
+    ```bash
+    # Run all detection heuristics
+    zsteg -a image.png
+
+    # Manually specify bit 1, XY order, verbose output
+    zsteg image.png -b 1 -o xy -v
+
+    # Check specific channel (r, g, b, a)
+    zsteg image.png --lsb --msb -c b
+
+    # Extract and save a detected payload
+    zsteg image.png -E "b1,rgb,lsb,xy" > extracted_payload
+    ```
+
+    `zsteg` prints the decoded string next to each detection. If any line contains what looks like a flag format, note the extraction parameters and re-run with `-E` to save the full payload.
+  </Tab>
+  <Tab title="JPEG — steghide">
+    JPEG uses DCT coefficient modification rather than raw pixel LSB. `steghide` is the most common tool for JPEG steganography in CTFs. Many challenges use an empty password; always try a blank passphrase first.
+
+    ```bash
+    # Attempt extraction with no password
+    steghide extract -sf image.jpg
+
+    # Extraction with a known or guessed password
+    steghide extract -sf image.jpg -p "password"
+
+    # Inspect cover info without extracting
+    steghide info image.jpg
+    ```
+
+    If you don't know the password, try common CTF passphrases (`""`, `"ctf"`, the challenge name, the image filename) before reaching for a brute-force tool like `stegseek`.
+
+    ```bash
+    # Brute force steghide password with a wordlist
+    stegseek image.jpg /usr/share/wordlists/rockyou.txt
+    ```
+  </Tab>
+</Tabs>
+
+### Step 4: Extracting Appended or Embedded Files
+
+Some of the most common steganography challenges in CTFs don't use sophisticated bit-level hiding at all — they simply append a ZIP, another image, or a text file after the legitimate file's closing bytes. `binwalk` detects these overlapping signatures; the `-e` flag extracts them automatically.
+
+```bash
+# Detect embedded signatures
+binwalk challenge.png
+
+# Extract everything detected
+binwalk -e challenge.png
+
+# Force extraction even without a recognized signature
+binwalk -e --dd='.*' challenge.png
+
+# Use foremost as an alternative carver
+foremost -i challenge.png -o ./carved_output/
+```
+
+After extraction, check the `_challenge.png.extracted/` directory. You'll often find a ZIP archive, a second image, or a plain text file containing the flag. If the extracted archive is password-protected, try the same common passwords you'd try with `steghide`.
+
+<Note>
+  A JPEG file's legitimate data ends at `\xFF\xD9`. Anything after that offset is appended payload. Use `hexdump` to confirm the boundary and manually carve if `binwalk` misses it: `dd if=image.jpg bs=1 skip=<offset> of=appended.zip`
+</Note>
+
+### Step 5: Manual LSB Extraction with Python
+
+When `zsteg` doesn't find anything obvious, write your own extractor. This gives you full control over which channels to sample, which bit positions to read, and how to interpret the output. The example below extracts the LSB of the red channel in row-major order — the most common CTF LSB scheme.
+
+```python
+from PIL import Image
+
+img = Image.open('challenge.png')
+pixels = list(img.getdata())
+
+# Extract LSB from each pixel's R channel
+bits = [str(p[0] & 1) for p in pixels]
+byte_strings = [''.join(bits[i:i+8]) for i in range(0, len(bits), 8)]
+message = ''.join(chr(int(b, 2)) for b in byte_strings if int(b, 2) != 0)
+print(message)
+```
+
+Adapt this script by changing `p[0]` to `p[1]` or `p[2]` to sample the green or blue channel, or iterate over all three channels interleaved. You can also extract bits 1–7 (not just bit 0) by changing the mask: `p[0] & 2`, `p[0] & 4`, and so on.
+
+```python
+from PIL import Image
+
+def extract_lsb(image_path, channel=0, bit=0):
+    img = Image.open(image_path).convert('RGB')
+    pixels = list(img.getdata())
+    bits = [str((p[channel] >> bit) & 1) for p in pixels]
+    byte_strings = [''.join(bits[i:i+8]) for i in range(0, len(bits), 8)]
+    result = []
+    for b in byte_strings:
+        val = int(b, 2)
+        if val == 0:
+            break
+        result.append(chr(val))
+    return ''.join(result)
+
+# Try all channel/bit combinations
+for ch in range(3):
+    for bit in range(8):
+        out = extract_lsb('challenge.png', channel=ch, bit=bit)
+        if 'flag{' in out or 'CTF{' in out:
+            print(f"Channel {ch}, bit {bit}: {out}")
+```
+
+</Steps>
+
+## Audio Steganography
+
+Audio files introduce a second hiding dimension: the frequency domain. While pixel-level hiding works in images, audio flags often appear as shapes drawn in the spectrogram — only visible when you view the file's frequencies plotted over time.
+
+<Tabs>
+  <Tab title="Spectrogram Analysis">
+    Open the WAV file in Audacity, then switch the track view to spectrogram mode. Go to the track name dropdown → **Spectrogram**. Zoom into the high-frequency range (8–22 kHz) where humans can't hear well — that's where authors like to draw text.
+
+    ```bash
+    # Verify it's a valid WAV first
+    file audio.wav
+    exiftool audio.wav
+
+    # Open in Audacity (GUI)
+    audacity audio.wav
+
+    # Command-line spectrogram with sox
+    sox audio.wav -n spectrogram -o spectrogram.png
+    display spectrogram.png
+    ```
+
+    In the spectrogram, look for:
+    - Text characters visible as bright patterns at specific frequencies
+    - Morse code patterns (short/long pulses visible as repeated vertical stripes)
+    - QR codes or bar codes rendered in the frequency domain
+
+    <Tip>
+      Adjust Audacity's spectrogram color scheme to **Roseus** or **Spectrum** and crank the **Gain** and **Range** sliders for maximum contrast. Faint images that look like noise at default settings become clearly readable.
+    </Tip>
+  </Tab>
+  <Tab title="LSB in Audio">
+    WAV files store uncompressed PCM samples — each sample is typically a 16-bit integer. LSB steganography replaces the least-significant bit of each sample with a payload bit. The audible difference is a tiny increase in noise floor, completely inaudible in practice.
+
+    ```python
+    import wave
+    import struct
+
+    def extract_lsb_audio(wav_path):
+        with wave.open(wav_path, 'rb') as w:
+            frames = w.readframes(w.getnframes())
+            n_channels = w.getnchannels()
+            sampwidth = w.getsampwidth()
+
+        # Unpack 16-bit samples
+        samples = struct.unpack('<' + 'h' * (len(frames) // 2), frames)
+        bits = [str(s & 1) for s in samples]
+        byte_strings = [''.join(bits[i:i+8]) for i in range(0, len(bits), 8)]
+
+        message = []
+        for b in byte_strings:
+            val = int(b, 2)
+            if val == 0:
+                break
+            message.append(chr(val))
+        return ''.join(message)
+
+    print(extract_lsb_audio('audio.wav'))
+    ```
+
+    Also try `steghide` on WAV files — it supports WAV in addition to JPEG and BMP:
+
+    ```bash
+    steghide extract -sf audio.wav
+    steghide extract -sf audio.wav -p "password"
+    ```
+  </Tab>
+</Tabs>
+
+## Tool Reference
+
+<CodeGroup>
+
+```bash PNG Toolkit
+# Full zsteg scan
+zsteg -a image.png
+
+# Targeted extraction
+zsteg image.png -b 1 -o xy -v
+zsteg image.png -E "b1,rgb,lsb,xy" > payload
+
+# Binwalk carving
+binwalk -e image.png
+foremost -i image.png -o ./out/
+```
+
+```bash JPEG Toolkit
+# Steghide extraction
+steghide extract -sf image.jpg
+steghide extract -sf image.jpg -p "password"
+steghide info image.jpg
+
+# Brute force password
+stegseek image.jpg /usr/share/wordlists/rockyou.txt
+
+# EXIF deep dive
+exiftool -all image.jpg
+exiftool -b -ThumbnailImage image.jpg > thumb.jpg
+```
+
+```bash Audio Toolkit
+# Spectrogram to PNG
+sox audio.wav -n spectrogram -o spec.png
+
+# Steghide on WAV
+steghide extract -sf audio.wav
+
+# File structure check
+file audio.wav
+binwalk audio.wav
+strings audio.wav | grep -i flag
+```
+
+</CodeGroup>
+
+<Warning>
+  Online steganography decoders exist and are tempting shortcuts, but they log your uploads. Never submit challenge files — which may contain sensitive competition data — to third-party websites. Run all analysis locally.
+</Warning>

@@ -1,0 +1,90 @@
+---
+title: "Binary Exploitation CTF Challenges: Pwn Techniques"
+sidebarTitle: "Overview"
+description: "Explore binary exploitation CTF challenges covering buffer overflows, ROP chains, heap exploits, and format strings. Learn to pwn with pwntools."
+---
+
+Binary exploitation — universally known in CTF circles as **pwn** — is the discipline of finding and abusing memory corruption bugs in compiled programs to seize control of execution. You receive a binary (sometimes with its C source), a remote host to connect to, and one objective: extract the flag or pop a shell. The gap between reading a crash and turning it into a reliable exploit is where the real learning happens, and CTF pwn challenges are designed to walk you through that gap one technique at a time.
+
+## The Pwn Mindset
+
+When you approach a pwn challenge, you are reverse-engineering trust. The program was written assuming its inputs stay within certain boundaries; your job is to violate those assumptions in a precise, controlled way. Every byte of your payload is intentional. You are not guessing — you are constructing a mathematical argument that the CPU will execute on your behalf.
+
+Good pwn players think in layers: What does the source tell me? What does the disassembly confirm? What protections are active? What primitive do I have (write-what-where, control of the instruction pointer, information leak)? Work from primitive to exploit, and never skip the recon phase.
+
+## Binary Protections You Will Encounter
+
+Modern Linux binaries ship with several mitigations designed to make exploitation harder. Understanding what each one does — and how CTF challenges defeat or require you to defeat it — is essential before you write a single line of exploit code.
+
+<Accordion title="ASLR — Address Space Layout Randomization">
+ASLR is a kernel feature that randomizes the base addresses of the stack, heap, and shared libraries each time a process starts. If you hardcode a libc address, it will be wrong on the next run. Defeating ASLR requires an **information leak**: find a way to read a pointer from the process's memory, calculate the randomization offset (the "base"), and rebase all your gadget addresses at runtime.
+</Accordion>
+
+<Accordion title="NX — No-Execute (also called DEP or W^X)">
+NX marks the stack and heap as non-executable. If NX is enabled, you cannot simply stuff shellcode into a buffer and jump to it — the CPU will raise a fault. The canonical bypass is **Return-Oriented Programming (ROP)**: chain together small snippets of existing executable code ("gadgets") to perform arbitrary computation without injecting new instructions.
+</Accordion>
+
+<Accordion title="Stack Canaries">
+The compiler inserts a secret random value (the "canary") between local variables and the saved return address. Before the function returns, it checks that the canary is intact. If you overwrite it during a linear buffer overflow, the program calls `__stack_chk_fail` and aborts. Bypasses include leaking the canary value first (format string bugs, partial overwrites) or exploiting a bug that doesn't cross the canary (heap overflow, use-after-free).
+</Accordion>
+
+<Accordion title="PIE — Position-Independent Executable">
+PIE means the binary itself is loaded at a random base address, just like a shared library. With PIE enabled, you can't hardcode addresses for functions or gadgets inside the binary — they shift every run. You need a leak of a code pointer (return address on the stack, GOT entry, etc.) to compute the binary's base and rebase your targets.
+</Accordion>
+
+## Your First Five Commands
+
+Before you open a disassembler or write a single byte of payload, run these four commands on every new binary. They answer the most important early questions: architecture, bitness, protections enabled, and whether the flag is sitting in plaintext.
+
+```bash
+file challenge
+checksec --file=challenge
+strings challenge | grep -i flag
+gdb -q challenge
+```
+
+<Tip>
+Run `checksec` before anything else. It tells you which mitigations are active in under a second and completely shapes which techniques you need. A binary with no canary and no PIE is a very different problem from one with everything enabled.
+</Tip>
+
+<Tip>
+`strings challenge | grep -i flag` sounds obvious, but CTF organizers occasionally hide the flag in the binary itself or leave debug strings that reveal function names, expected input formats, or file paths. Always check.
+</Tip>
+
+## Challenge Categories in This Section
+
+The writeups below cover the two most foundational pwn techniques. Master these and you have the mental model needed to approach heap exploitation, format string attacks, and kernel pwn.
+
+<CardGroup cols={2}>
+  <Card
+    title="Buffer Overflow"
+    icon="layer-group"
+    href="/writeups/pwn/buffer-overflow"
+  >
+    Smash the stack, control the instruction pointer, and redirect execution to a win function or a libc shell. Covers ret2win and ret2libc with full pwntools exploits.
+  </Card>
+  <Card
+    title="ROP Chains"
+    icon="link"
+    href="/writeups/pwn/rop-chains"
+  >
+    Bypass NX by chaining existing code gadgets. Covers ROPgadget, leaking libc with ret2plt, computing libc base, and calling system("/bin/sh").
+  </Card>
+</CardGroup>
+
+## Recommended Tools
+
+Every exploit in this section is written with the following toolchain. Install them once and they carry you through the vast majority of CTF pwn categories.
+
+| Tool | Purpose |
+|---|---|
+| `pwntools` | Python library for building and delivering exploits |
+| `GDB` + `pwndbg` or `peda` | Dynamic analysis, crash inspection, memory examination |
+| `checksec` | One-command protection summary (bundled with pwntools) |
+| `ROPgadget` | Static gadget search across a binary |
+| `file` / `readelf` | Architecture and metadata identification |
+| `strings` | Quick plaintext scan |
+
+<Note>
+All writeups assume a Linux environment. If you are on macOS or Windows, run your exploits inside a Docker container or VM that matches the challenge's libc version. Libc offsets differ between versions — an exploit built against `libc-2.31` will fail silently against `libc-2.35`.
+</Note>

@@ -1,0 +1,85 @@
+---
+title: "Cryptography CTF Challenges: Breaking Ciphers"
+sidebarTitle: "Overview"
+description: "Explore cryptography CTF challenges covering RSA, AES, hashing, classical ciphers, and more. Learn how to identify and exploit cryptographic weaknesses."
+---
+
+Cryptography challenges are among the most rewarding categories in CTF competitions. Your goal is never to break the underlying mathematics — modern algorithms like RSA and AES are computationally sound when used correctly. Instead, you're hunting for the human mistakes: a key that's too small, a nonce that gets reused, a padding scheme that leaks information, or a primitive that's been wired together incorrectly. Once you learn to read cryptographic code with an attacker's eye, you'll start spotting these flaws almost immediately.
+
+## The Attacker's Mindset
+
+Before you write a single line of exploit code, slow down and read the challenge carefully. Most crypto CTF challenges hand you everything you need — the ciphertext, the public key, sometimes even the encryption script itself. Your job is to map what you're given onto a known attack class, then execute.
+
+<Tip>
+Start by identifying the algorithm. Look at key sizes, parameter names, and any imports in provided source code. A 512-bit RSA modulus, an `e` value of 3, or an AES script that never changes its IV are all immediate red flags.
+</Tip>
+
+<Tip>
+Check for small or weak keys first. Run the modulus through [factordb.com](https://factordb.com) or use `openssl` to inspect a public key before attempting anything more complex. Many CTF challenges are solved in under a minute this way.
+</Tip>
+
+<Tip>
+Look for reused nonces or IVs. CTR and GCM modes are catastrophically broken when a nonce is reused. CBC mode leaks information when the IV equals the key. These mistakes appear constantly in CTF challenges because they're easy to introduce and hard to notice during development.
+</Tip>
+
+<Tip>
+Try known-plaintext attacks when you have any control over input or know part of the plaintext. ECB mode oracles, padding oracles, and bit-flipping attacks all rely on submitting crafted data and observing how the system responds.
+</Tip>
+
+## Sub-Categories
+
+Cryptography challenges in CTFs span a wide range of topics. Here's how the major sub-categories break down and what to watch for in each.
+
+### Asymmetric Cryptography (RSA, ECC)
+
+RSA dominates asymmetric crypto challenges. Attacks usually target weak key generation (small primes, small exponents), implementation shortcuts (no OAEP padding, reused moduli), or mathematical relationships between multiple ciphertexts. Elliptic curve challenges appear less frequently but often involve invalid curve attacks or weak curve parameters.
+
+### Symmetric Cryptography (AES, DES)
+
+AES challenges almost always attack the *mode of operation* rather than the cipher itself. ECB mode leaks block-level patterns, CBC mode is vulnerable to padding oracles and IV manipulation, and CTR mode becomes a one-time pad — with all the fragility that implies — if a keystream is ever reused. DES and 3DES appear in older-style challenges and are susceptible to meet-in-the-middle attacks.
+
+### Hashing and MACs
+
+Hash challenges fall into a few buckets: cracking unsalted hashes with wordlists or rainbow tables, exploiting length extension vulnerabilities in Merkle–Damgård constructions (MD5, SHA-1, SHA-256), and bypassing loose hash comparisons in languages like PHP. HMAC challenges sometimes involve timing attacks or key-recovery through weak secret generation.
+
+### Classical and Custom Ciphers
+
+Vigenère, Caesar, substitution ciphers, and one-time pads with reused keys all show up in beginner-to-intermediate challenges. Custom ciphers built by challenge authors are usually broken through frequency analysis, known-plaintext recovery, or identifying structural weaknesses in the design.
+
+## Challenge Pages
+
+Dive into the detailed writeups for each major sub-category below.
+
+<CardGroup cols={2}>
+  <Card title="RSA Attacks" icon="key" href="/writeups/crypto/rsa">
+    Factor weak moduli, exploit small exponents, run Wiener's attack, and automate everything with RsaCtfTool.
+  </Card>
+  <Card title="AES Mode Vulnerabilities" icon="lock" href="/writeups/crypto/aes">
+    Detect ECB patterns, execute padding oracle attacks, exploit IV reuse, and recover CTR keystreams.
+  </Card>
+  <Card title="Hash Cracking" icon="shield" href="/writeups/crypto/hashing">
+    Crack MD5 and SHA hashes with hashcat and John, exploit length extension, and bypass PHP hash comparisons.
+  </Card>
+  <Card title="Classical Ciphers" icon="scroll" href="/writeups/crypto/hashing">
+    Break Caesar, Vigenère, and substitution ciphers using frequency analysis and index of coincidence.
+  </Card>
+</CardGroup>
+
+## General Toolkit
+
+Before you tackle any crypto challenge, make sure these tools are available in your environment.
+
+| Tool | Purpose |
+|---|---|
+| `pycryptodome` | Python cryptography library — AES, RSA, hashing |
+| `gmpy2` | Fast arbitrary-precision arithmetic for RSA math |
+| `SageMath` | Computer algebra system for number theory attacks |
+| `RsaCtfTool` | Automated RSA attack suite |
+| `hashcat` | GPU-accelerated hash cracking |
+| `John the Ripper` | Versatile offline password and hash cracker |
+| `hash_extender` | Length extension attack automation |
+| `CyberChef` | Browser-based encoding, decoding, and cipher analysis |
+
+<Note>
+When a challenge provides source code, read it before touching the ciphertext. The vulnerability is almost always visible in the code — a missing check, a hardcoded value, or a parameter passed in the wrong order.
+</Note>

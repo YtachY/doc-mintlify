@@ -1,0 +1,342 @@
+---
+title: "PCAP Network Forensics CTF Writeup: Analyzing Traffic"
+sidebarTitle: "PCAP Analysis"
+description: "Network forensics CTF walkthrough using Wireshark and tshark to extract files, follow streams, decrypt TLS, and recover flags from packet captures."
+---
+
+Network forensics challenges give you a packet capture and ask you to reconstruct what happened on the wire. The flag might be sitting in plaintext inside an HTTP request body, encoded across dozens of DNS queries, transferred over FTP, or locked inside a TLS session waiting for you to apply the provided key material. Your job is to approach the capture systematically: understand the traffic landscape first, then drill into the streams and protocols most likely to carry the payload.
+
+## Challenge Setup
+
+You receive a file — typically `capture.pcap` or `capture.pcapng` — and a brief prompt that may hint at a protocol ("someone was browsing the web") or say nothing at all. Open it in Wireshark for a visual overview, then switch to `tshark` for targeted filtering and bulk extraction. Both tools read the same file format, so you can move between them freely as the analysis demands.
+
+<Steps>
+
+### Step 1: Initial Overview in Wireshark
+
+Open the capture and get your bearings before diving into any single stream.
+
+```bash
+# Verify the file is a valid capture
+file capture.pcap
+
+# Open in Wireshark
+wireshark capture.pcap &
+
+# Quick stats from the command line
+capinfos capture.pcap
+tshark -r capture.pcap -z io,phs -q
+```
+
+In Wireshark, check **Statistics → Protocol Hierarchy** first. This gives you a breakdown of every protocol present and what percentage of packets each accounts for. A capture with 40% DNS traffic when you'd expect almost none is an immediate red flag for DNS tunneling or exfiltration.
+
+Next, open **Statistics → Conversations** to see which hosts talked the most and on which ports. The most active TCP conversations usually contain the interesting application-layer data.
+
+<Tip>
+  Use **Statistics → Protocol Hierarchy** as your map and **Statistics → Conversations** as your compass. Together they tell you *what* protocols are present and *who* was talking — narrowing your search from thousands of packets to a handful of streams.
+</Tip>
+
+### Step 2: Following TCP and HTTP Streams
+
+The most direct path to a flag in HTTP or plaintext TCP traffic is following a stream. Wireshark reconstructs the full bidirectional conversation and displays it as readable text.
+
+In Wireshark:
+1. Click any packet in the conversation you want to inspect
+2. Right-click → **Follow → TCP Stream** (or HTTP Stream for HTTP traffic)
+3. Read the full request and response; look for flag patterns, credentials, or Base64 blobs
+4. Use the **Find** box at the bottom of the stream window to search for `flag{`
+
+```
+# Wireshark display filter to isolate HTTP traffic
+http
+
+# Filter for a specific host
+http.host == "example.com"
+
+# Search for flag pattern across all packets
+frame contains "flag{"
+
+# Filter POST requests (flag often in request body)
+http.request.method == "POST"
+
+# Show only responses with 200 OK
+http.response.code == 200
+```
+
+For FTP, follow the control stream first (port 21) to see the commands and filenames exchanged, then find the corresponding data stream (ephemeral port) to recover the transferred file contents.
+
+### Step 3: Extracting Transferred Files
+
+When the flag is inside a file transferred over HTTP, FTP, or SMB, you need to reconstruct that file from the packet data. Wireshark's export feature handles this automatically for HTTP.
+
+In Wireshark: **File → Export Objects → HTTP**
+
+This opens a dialog listing every file transferred over HTTP in the capture. Select them all and save to a directory, then run `file` and `exiftool` on each one.
+
+For FTP, the process is manual:
+1. Find the FTP control stream and note the filename (`RETR filename.zip`)
+2. Identify the data connection (look for a `PORT` or `PASV` command to get the port number)
+3. Follow the TCP stream on that data port and save the raw bytes: **Save As → Raw**
+
+```bash
+# Extract all HTTP objects via tshark
+tshark -r capture.pcap --export-objects http,./extracted/
+
+# List what was extracted
+ls -la ./extracted/
+file ./extracted/*
+```
+
+<Note>
+  When saving raw stream data in Wireshark, always choose **Raw** (not ASCII) in the "Show data as" dropdown before saving. ASCII mode silently corrupts binary files like images, ZIPs, and executables.
+</Note>
+
+### Step 4: DNS Exfiltration
+
+DNS exfiltration encodes data as subdomains of a controlled domain, abusing the fact that DNS queries typically bypass egress filtering. Each query looks like `d2FsdGVy.evil.com` — a Base64 or hex chunk of the exfiltrated payload prepended to the attacker's domain.
+
+Look for DNS exfiltration when:
+- The protocol hierarchy shows unexpectedly high DNS volume
+- DNS queries have unusually long subdomains (>30 characters)
+- Many queries resolve the same apex domain with different subdomains
+- Subdomain strings look like Base64 (`[A-Za-z0-9+/=]`) or hex
+
+```bash
+# Extract all DNS query names
+tshark -r capture.pcap -Y dns -T fields -e dns.qry.name
+
+# Filter to a suspicious domain
+tshark -r capture.pcap -Y 'dns.qry.name contains "evil.com"' \
+  -T fields -e dns.qry.name
+
+# Sort and deduplicate to see the full sequence
+tshark -r capture.pcap -Y dns -T fields -e dns.qry.name \
+  | sort -u
+```
+
+Once you've extracted the subdomain strings, strip the apex domain and decode. If each subdomain is a Base64 chunk, concatenate them in order and decode:
+
+```python
+import base64
+
+subdomains = [
+    "ZmxhZ3tk",
+    "bnNfZXhm",
+    "aWx0cmF0",
+    "aW9ufQ==",
+]
+
+# Strip apex domain and reassemble
+payload = ''.join(s.split('.')[0] for s in subdomains)
+print(base64.b64decode(payload).decode())
+```
+
+### Step 5: Decrypting TLS Traffic
+
+If the capture contains HTTPS or other TLS-encrypted traffic and the challenge provides a key file (usually labelled `server.key`, `tls_key.log`, or similar), you can decrypt it directly in Wireshark.
+
+**Using a pre-master secret log (SSLKEYLOGFILE):**
+1. Go to **Edit → Preferences → Protocols → TLS**
+2. Set **(Pre)-Master-Secret log filename** to the path of the `.log` file
+3. Apply — Wireshark decrypts in place and HTTP traffic becomes visible
+
+**Using a server private key (RSA only, no PFS):**
+1. Go to **Edit → Preferences → Protocols → TLS → RSA Keys list → Edit**
+2. Add an entry: IP address, port, protocol (`http`), and path to the `.key` file
+3. Apply and re-inspect the TLS streams
+
+```bash
+# Decrypt with tshark using a key log file
+tshark -r capture.pcap \
+  -o "tls.keylog_file:tls_key.log" \
+  -Y http -T fields \
+  -e http.request.uri \
+  -e http.file_data
+
+# Decrypt and export HTTP objects
+tshark -r capture.pcap \
+  -o "tls.keylog_file:tls_key.log" \
+  --export-objects http,./decrypted/
+```
+
+<Warning>
+  RSA key decryption in Wireshark only works when the session used RSA key exchange (no forward secrecy). If the handshake negotiated ECDHE or DHE, you must have the SSLKEYLOGFILE log — the private key alone is not sufficient.
+</Warning>
+
+### Step 6: Command-Line Analysis with tshark
+
+`tshark` lets you script your analysis, process large captures faster than the GUI, and integrate packet parsing into pipelines. Use it whenever you need to bulk-extract fields or automate repetitive filtering.
+
+```bash
+# Overview: list all TCP conversations
+tshark -r capture.pcap -z conv,tcp -q
+
+# Extract HTTP URIs and response codes
+tshark -r capture.pcap -Y http -T fields \
+  -e http.request.method \
+  -e http.request.uri \
+  -e http.response.code
+
+# Extract HTTP request bodies (POST data)
+tshark -r capture.pcap -Y "http.request.method==POST" \
+  -T fields -e http.file_data | xxd
+
+# Extract all DNS queries
+tshark -r capture.pcap -Y dns -T fields -e dns.qry.name
+
+# Show FTP commands
+tshark -r capture.pcap -Y ftp -T fields \
+  -e ftp.request.command \
+  -e ftp.request.arg
+
+# Dump raw TCP payload for a specific stream
+tshark -r capture.pcap -q -z follow,tcp,raw,0
+```
+
+### Step 7: Custom Parsing with Scapy
+
+When the flag is in a non-standard protocol, a raw TCP stream, or a custom application protocol, write a Python script with Scapy to inspect payloads programmatically. This is faster than manually clicking through packets in Wireshark and lets you apply arbitrary logic.
+
+```python
+from scapy.all import rdpcap, TCP, Raw
+
+packets = rdpcap('capture.pcap')
+for pkt in packets:
+    if TCP in pkt and Raw in pkt:
+        payload = pkt[Raw].load
+        if b'flag{' in payload:
+            print(payload)
+```
+
+For more complex analysis — reassembling fragmented streams, decoding custom encodings, or correlating packets across flows:
+
+```python
+from scapy.all import rdpcap, TCP, IP, Raw
+from collections import defaultdict
+
+packets = rdpcap('capture.pcap')
+
+# Reassemble TCP streams by (src_ip, src_port, dst_ip, dst_port)
+streams = defaultdict(bytearray)
+
+for pkt in packets:
+    if IP in pkt and TCP in pkt and Raw in pkt:
+        key = (pkt[IP].src, pkt[TCP].sport, pkt[IP].dst, pkt[TCP].dport)
+        streams[key] += pkt[Raw].load
+
+for flow, data in streams.items():
+    if b'flag{' in data:
+        start = data.index(b'flag{')
+        end = data.index(b'}', start) + 1
+        print(f"Flow {flow}: {data[start:end].decode()}")
+```
+
+</Steps>
+
+## Common Wireshark Filters Reference
+
+<Accordion title="Protocol Filters">
+```
+# Show only HTTP traffic
+http
+
+# Show only DNS queries and responses
+dns
+
+# Show FTP control channel
+ftp
+
+# Show FTP data transfers
+ftp-data
+
+# Show all TCP traffic
+tcp
+
+# Show UDP traffic
+udp
+
+# Show ICMP (sometimes used for tunneling)
+icmp
+```
+</Accordion>
+
+<Accordion title="Content Search Filters">
+```
+# Search for literal string in any packet
+frame contains "flag{"
+
+# Case-insensitive search (use display filter expression)
+frame matches "(?i)flag"
+
+# Search in TCP payload only
+tcp contains "flag{"
+
+# Search in HTTP body
+http contains "flag{"
+
+# Find packets with specific byte sequence (hex)
+frame[0:4] == 89:50:4e:47
+```
+</Accordion>
+
+<Accordion title="IP and Port Filters">
+```
+# Filter by source IP
+ip.src == 192.168.1.100
+
+# Filter by destination IP
+ip.dst == 10.0.0.1
+
+# Filter by either direction
+ip.addr == 192.168.1.100
+
+# Filter by destination port
+tcp.dstport == 80
+tcp.dstport == 443
+tcp.dstport == 21
+
+# Filter by port in either direction
+tcp.port == 4444
+
+# Exclude noise (e.g., remove broadcast traffic)
+!arp && !icmp && !dns
+```
+</Accordion>
+
+<Accordion title="Stream and Session Filters">
+```
+# Filter by TCP stream index (0-based)
+tcp.stream eq 0
+
+# Show only packets with data payload
+tcp.len > 0
+
+# Show TCP SYN packets (connection initiations)
+tcp.flags.syn == 1 && tcp.flags.ack == 0
+
+# Show HTTP redirects
+http.response.code == 302
+
+# Show HTTP file uploads
+http.request.method == "PUT" || http.request.method == "POST"
+```
+</Accordion>
+
+<Accordion title="TLS and Encryption Filters">
+```
+# Show TLS handshakes
+tls.handshake
+
+# Show ClientHello (reveals SNI / hostname)
+tls.handshake.type == 1
+
+# Filter by TLS version
+tls.record.version == 0x0303
+
+# Show encrypted application data
+tls.record.content_type == 23
+
+# After applying key log: show decrypted HTTP
+http && tls
+```
+</Accordion>

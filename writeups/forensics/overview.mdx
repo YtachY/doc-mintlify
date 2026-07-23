@@ -1,0 +1,91 @@
+---
+title: "Forensics CTF Challenges: Uncover Hidden Data"
+sidebarTitle: "Overview"
+description: "Explore forensics CTF challenges covering steganography, PCAP analysis, disk images, memory dumps, and file carving to uncover hidden flags."
+---
+
+Forensics challenges ask you to think like a digital investigator. You receive a file, a packet capture, a disk image, or a memory dump — and somewhere inside is a flag that someone tried to hide, delete, or obscure. Your job is to be methodical: enumerate everything you can observe, apply the right tools for the file type, and follow every lead until you find what doesn't belong. Unlike exploitation challenges, forensics rewards patience and a wide toolkit over a single clever trick.
+
+## What Is Digital Forensics in CTFs?
+
+In real-world digital forensics, investigators recover evidence from devices and networks to reconstruct events. CTF forensics borrows the same techniques and turns them into puzzles. The flag might be hidden in an image's pixel data, encoded inside a DNS query, buried in deleted file clusters, or lurking in a memory dump's heap. Each sub-category demands a slightly different mindset and toolset.
+
+<CardGroup cols={2}>
+  <Card title="Steganography" icon="image" href="/writeups/forensics/steganography">
+    Extract flags hidden inside images, audio files, and other media using LSB analysis, steghide, zsteg, and spectrogram inspection.
+  </Card>
+  <Card title="PCAP Analysis" icon="wifi" href="/writeups/forensics/pcap-analysis">
+    Reconstruct network sessions, follow TCP streams, carve transferred files, and decrypt TLS traffic to recover flags from packet captures.
+  </Card>
+</CardGroup>
+
+## Sub-Categories
+
+### Steganography
+
+Steganography is the art of hiding data inside other data. In CTFs you'll most often see flags concealed in PNG or JPEG images using least-significant-bit (LSB) encoding, appended as raw bytes after a file's legitimate end, or embedded in audio spectrograms. The challenge rarely announces the technique — you have to probe every layer.
+
+### Network Forensics (PCAP)
+
+Network forensics challenges give you a `.pcap` or `.pcapng` file and ask you to reconstruct what happened on the wire. Flags appear as plaintext HTTP payloads, FTP transfers, DNS tunneling strings, or inside TLS sessions when key material is provided. Wireshark and `tshark` are your primary instruments.
+
+### Disk and Memory Forensics
+
+Disk images (`.img`, `.dd`, `.vmdk`) let you mount a file system and examine deleted files, slack space, and partition tables. Memory dumps (`.raw`, `.dmp`) capture a running system's RAM; tools like Volatility let you list processes, extract strings, and dump heap regions to find flags that never touched the disk.
+
+### File Carving
+
+File carving reconstructs files from a raw byte stream without relying on file system metadata. Tools like `foremost` and `photorec` scan for known magic bytes — `\xFF\xD8\xFF` for JPEG, `\x89PNG` for PNG — and reconstruct files even when the directory entries are gone. This technique applies to both disk images and suspicious binary blobs.
+
+## Your First-Look Checklist
+
+No matter what file you receive, run these commands before doing anything else. They take seconds and frequently hand you the flag or at least tell you exactly what kind of file you're dealing with.
+
+<Tip>
+  Make this checklist a shell alias or script. In a timed CTF, running all five commands in one shot saves minutes and ensures you never skip the basics under pressure.
+</Tip>
+
+```bash
+file mystery_file
+strings mystery_file | grep -i flag
+exiftool mystery_file
+binwalk mystery_file
+hexdump -C mystery_file | head -20
+```
+
+- **`file`** — identifies the true file type by inspecting magic bytes, ignoring the extension entirely.
+- **`strings`** — dumps all printable character sequences. Pipe through `grep -i flag` to catch obvious flags, but also scan the full output for URLs, passwords, and suspicious text.
+- **`exiftool`** — reads every metadata field the format supports. EXIF, XMP, IPTC, and format-specific comment fields are all fair game for flag hiding.
+- **`binwalk`** — scans for embedded file signatures and compressed data. A single image might contain a ZIP archive, a gzip stream, and a second PNG stacked inside it.
+- **`hexdump -C | head -20`** — shows the raw magic bytes and file header so you can cross-check what `file` reports and spot manual header manipulation.
+
+## General Strategy
+
+<Note>
+  Always work on a **copy** of the provided file. Some extraction tools modify files in place, and you don't want to corrupt the only copy of a challenge artifact mid-solve.
+</Note>
+
+1. **Identify the file type** — use `file` and a hex editor to confirm. Challenge authors frequently rename files or strip extensions to slow you down.
+2. **Harvest metadata** — run `exiftool` and read every field. Comments, GPS coordinates, author strings, and thumbnail data have all hidden flags in competition.
+3. **Look for embedded content** — `binwalk` and `foremost` reveal hidden archives, images, and executables appended to or compressed inside the carrier file.
+4. **Analyse the content itself** — for images, check LSB channels; for PCAPs, follow every stream; for disk images, mount and list deleted files with `tsk_recover`.
+5. **Check encoding layers** — flags are often Base64-, hex-, or ROT13-encoded on top of whatever container is hiding them. Once you extract suspicious bytes, throw them at CyberChef.
+
+<Warning>
+  Some forensics challenges intentionally plant red herrings — dummy strings that look like flags but fail validation, or embedded files that contain nothing useful. Don't stop at the first interesting-looking string; verify it against the flag format before declaring victory.
+</Warning>
+
+## Recommended Tools
+
+| Tool | Purpose | Install |
+|------|---------|---------|
+| `file` | Magic-byte file identification | Pre-installed on Linux/macOS |
+| `exiftool` | Metadata extraction | `apt install libimage-exiftool-perl` |
+| `binwalk` | Embedded file detection & extraction | `apt install binwalk` |
+| `foremost` | File carving from raw streams | `apt install foremost` |
+| `steghide` | JPEG/BMP steganography | `apt install steghide` |
+| `zsteg` | PNG/BMP LSB steganography | `gem install zsteg` |
+| Wireshark | GUI PCAP analysis | `apt install wireshark` |
+| `tshark` | CLI PCAP analysis | `apt install tshark` |
+| Volatility | Memory image forensics | [volatilityfoundation.org](https://www.volatilityfoundation.org) |
+| Audacity | Audio spectrogram analysis | `apt install audacity` |

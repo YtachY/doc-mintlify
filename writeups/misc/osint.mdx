@@ -1,0 +1,194 @@
+---
+title: "OSINT CTF Writeup: Open Source Intelligence Techniques"
+sidebarTitle: "OSINT"
+description: "OSINT CTF challenge walkthrough using Google dorking, reverse image search, social media investigation, geolocation, and Shodan to track down hidden flags."
+---
+
+OSINT (Open Source Intelligence) challenges ask you to find information about a target — a person, location, organization, or digital artifact — using only publicly available sources. No exploits, no brute force; just methodical research, creative searching, and the right tools applied in the right order. These challenges mirror real-world investigative techniques used by journalists, security researchers, and threat intelligence analysts. If you've never done OSINT before, CTF challenges are one of the best introductions: the scope is bounded, the flag confirms you're right, and the techniques you learn translate directly to professional practice.
+
+## Common Challenge Types
+
+OSINT challenges come in several recurring flavors. Knowing which type you're dealing with shapes your entire investigation strategy.
+
+- **Image geolocation:** You're given a photo and asked to identify the exact location, building, or coordinates where it was taken.
+- **Person profiling:** You're given a name, alias, or partial identity and asked to find a specific piece of information — an email address, employer, or something they posted online.
+- **Username tracking:** You're given a handle and asked to find where else that person appears across the internet and what they've revealed about themselves.
+- **Deleted content recovery:** A page or post has been removed, and you need to retrieve its contents from an archive or cache.
+- **Infrastructure investigation:** You're given a domain or organization name and asked to find exposed services, open ports, or misconfigured endpoints.
+
+## Investigation Workflow
+
+Follow this structured workflow for every OSINT challenge. The order matters — rushing to specialized tools before completing basic recon often causes you to miss obvious findings.
+
+<Steps>
+  <Step title="Document everything you've been given">
+    Before touching any tool, write down every piece of information in the challenge: names, usernames, URLs, image filenames, dates, and any flavor text in the description. These are all potential leads. Note what format the flag takes so you recognize it when you find it.
+  </Step>
+
+  <Step title="Extract metadata from any provided files">
+    Run `exiftool` on every image, document, or file attachment. Authors frequently embed GPS coordinates, device information, timestamps, and author names in file metadata — sometimes intentionally as part of the puzzle, sometimes accidentally as a shortcut to the solution.
+
+    ```bash
+    exiftool challenge_image.jpg
+    ```
+
+    Look for `GPS Latitude`, `GPS Longitude`, `Author`, `Creator`, `Comment`, and `Software` fields. If GPS coordinates are present, paste them directly into Google Maps or Google Earth.
+  </Step>
+
+  <Step title="Perform reverse image search">
+    Upload any provided images to multiple reverse image search engines. Different engines index different sources, so using all three significantly increases your coverage.
+
+    - **Google Images** (`images.google.com`) — best for mainstream web content and news photos
+    - **TinEye** (`tineye.com`) — best for tracking the original source of an image
+    - **Yandex Images** (`yandex.com/images`) — often outperforms Google for landmark and building identification, particularly for non-English locations
+
+    If the image contains text, signs, logos, or distinctive architecture, crop tightly around those elements and search again. Yandex is especially strong at matching partial scenes and oblique angles of buildings.
+  </Step>
+
+  <Step title="Run Google dorks against the target">
+    Google's advanced search operators let you scope queries precisely. Use them to find pages, documents, and cached content that a normal search would bury.
+
+    ```
+    site:pastebin.com "CTF_USERNAME"
+    filetype:pdf "flag{"
+    inurl:admin site:target.com
+    cache:target.com/secret
+    ```
+
+    Combine operators for tighter targeting. `site:` restricts results to a specific domain, `filetype:` finds specific document types, `inurl:` matches text in the URL itself, and `cache:` retrieves Google's cached copy of a page — useful if the live version has been removed.
+
+    <Tip>
+    Try wrapping the exact challenge username or alias in quotes and searching without any operators first. Sometimes a single direct hit surfaces the answer before you need to reach for dorking.
+    </Tip>
+  </Step>
+
+  <Step title="Enumerate the username across platforms">
+    If you have a username or handle, check it across every major platform manually or with a script. Even if the main account is deleted, a secondary platform may still have posts, a bio, or a linked site containing the flag.
+
+    ```python
+    import requests
+
+    username = "ctf_player_name"
+    sites = [
+        "https://github.com/{}",
+        "https://twitter.com/{}",
+        "https://pastebin.com/u/{}",
+        "https://reddit.com/user/{}",
+    ]
+
+    for site in sites:
+        url = site.format(username)
+        r = requests.get(url, timeout=5)
+        if r.status_code == 200:
+            print(f"[+] Found: {url}")
+    ```
+
+    Tools like [Sherlock](https://github.com/sherlock-project/sherlock) and [Maigret](https://github.com/soxoj/maigret) automate this across hundreds of platforms. Run them first, then follow up manually on any hits.
+  </Step>
+
+  <Step title="Search Shodan for exposed infrastructure">
+    If the challenge gives you a domain name, IP address, or organization name, use Shodan to find what services are publicly exposed. Shodan indexes banners, certificates, and response headers from internet-facing services worldwide.
+
+    ```
+    hostname:target.com
+    org:"Target Company" port:22
+    ssl:"flag{" 200
+    ```
+
+    The `ssl:` filter is particularly powerful in CTF scenarios — challenge authors sometimes embed the flag directly in a TLS certificate's common name or subject alternative names. The `200` at the end filters for hosts returning HTTP 200, cutting out unreachable services.
+
+    <Note>
+    Shodan's free tier limits the number of results and filters available. Most CTF OSINT challenges are solvable with the free tier, but if you're hitting walls, the academic discount makes a paid account very affordable.
+    </Note>
+  </Step>
+
+  <Step title="Check the Wayback Machine for deleted content">
+    If a URL is referenced in the challenge but returns a 404, or if you suspect content has been deliberately removed, check the Internet Archive's Wayback Machine at `web.archive.org`. Enter the full URL and browse available snapshots by date.
+
+    Pay attention to the snapshot calendar — the dates of available captures can themselves be a clue. If captures suddenly stop, something was likely taken down intentionally. Check the last few snapshots before the gap.
+
+    Also try Google's cache directly by prefixing the URL with `cache:` in a search query, and check `cachedview.nl` and `archive.ph` as alternative caching services.
+  </Step>
+</Steps>
+
+## Reverse Image Search Deep Dive
+
+Reverse image search is often the fastest path through an image geolocation challenge. The technique is simple, but the results vary dramatically depending on which engine you use and how you crop the input image.
+
+<Tabs>
+  <Tab title="Google Images">
+    Google Images works best when the subject of the photo is well-represented on the English-language web — famous landmarks, news events, product photos, and memes. Drag and drop the file onto `images.google.com` or click the camera icon to upload.
+
+    When results aren't helpful, try these refinements:
+    - Crop to the most distinctive element in the image (a sign, a logo, a specific architectural feature)
+    - Use Google Lens for scene recognition and text extraction
+    - Search for any readable text in the image as a regular text query
+  </Tab>
+  <Tab title="TinEye">
+    TinEye specializes in finding the **original source** of an image and tracking where it has been reused or modified. This is valuable when a challenge image is a screenshot of a social media post or a photo lifted from a specific blog — TinEye can point you directly to the original URL.
+
+    TinEye also shows you the earliest date it indexed an image, which can help establish a timeline for the challenge scenario.
+  </Tab>
+  <Tab title="Yandex Images">
+    Yandex consistently outperforms Google and TinEye for identifying buildings, street scenes, and geographic locations — especially outside North America and Western Europe. Upload the image at `yandex.com/images` and click the camera icon.
+
+    Yandex's scene recognition is particularly strong. It will often identify the specific city district, building, or street intersection visible in a photo where Google returns only country-level results.
+  </Tab>
+</Tabs>
+
+## Google Dorking Reference
+
+Google search operators unlock results that standard queries miss. Combine them freely — most operators can be chained in a single query.
+
+| Operator | Example | What it does |
+|---|---|---|
+| `site:` | `site:github.com username` | Restrict results to a specific domain |
+| `filetype:` | `filetype:pdf "confidential"` | Find files of a specific type |
+| `inurl:` | `inurl:backup site:target.com` | Match text in the URL |
+| `intitle:` | `intitle:"index of" passwords` | Match text in the page title |
+| `cache:` | `cache:target.com/page` | Retrieve Google's cached version |
+| `"exact phrase"` | `"flag{" site:pastebin.com` | Require an exact string match |
+| `-term` | `target.com -www` | Exclude pages containing a term |
+
+<Warning>
+Some Google dork queries — particularly those targeting login pages or exposed files on real domains — may trigger rate limiting or CAPTCHA. Use them responsibly and only against challenge-provided targets.
+</Warning>
+
+## Tools Reference
+
+<Accordion title="OSINT Tools Cheat Sheet">
+  **Reverse Image Search**
+  - [Google Images](https://images.google.com) — general-purpose, strong on English-language content
+  - [TinEye](https://tineye.com) — tracks image origin and reuse history
+  - [Yandex Images](https://yandex.com/images) — best for landmark and geographic identification
+
+  **Username Enumeration**
+  - [Sherlock](https://github.com/sherlock-project/sherlock) — checks 300+ platforms from the command line
+  - [Maigret](https://github.com/soxoj/maigret) — deep username search with profile aggregation
+  - [WhatsMyName](https://whatsmyname.app) — web-based username search with live results
+
+  **Metadata Extraction**
+  - `exiftool` — extracts metadata from images, PDFs, Office documents, and audio files
+  - `mat2` — strips metadata (useful for understanding what _would_ be present)
+  - [Jeffrey's Exif Viewer](http://exif.regex.info/exif.cgi) — web-based EXIF viewer with GPS map integration
+
+  **Infrastructure and Domain Research**
+  - [Shodan](https://shodan.io) — search engine for internet-connected devices and services
+  - [Censys](https://censys.io) — TLS certificate and host enumeration
+  - [VirusTotal](https://virustotal.com) — passive DNS, domain relationships, and file analysis
+  - `whois` — domain registration history and registrant information
+
+  **Cached and Archived Content**
+  - [Wayback Machine](https://web.archive.org) — historical snapshots of web pages
+  - [archive.ph](https://archive.ph) — on-demand page archiving and retrieval
+  - `cache:` Google operator — retrieve Google's most recent cached copy
+
+  **Geolocation**
+  - [Google Maps](https://maps.google.com) — paste GPS coordinates directly into the search bar
+  - [GeoGuessr](https://geoguessr.com) — training tool for visual geolocation skills
+  - [Overpass Turbo](https://overpass-turbo.eu) — query OpenStreetMap data for specific features
+</Accordion>
+
+<Tip>
+Build a personal OSINT checklist and run through it at the start of every challenge. Consistency beats inspiration — the winning move in OSINT is usually the third tool you try, not the tenth.
+</Tip>

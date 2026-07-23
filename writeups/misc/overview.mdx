@@ -1,0 +1,58 @@
+---
+title: "Miscellaneous CTF Challenges: OSINT and Reverse Engineering"
+sidebarTitle: "Overview"
+description: "Explore miscellaneous CTF challenges covering OSINT investigations, reverse engineering, scripting puzzles, and unconventional flag-finding techniques."
+---
+
+The miscellaneous category is the wild card of any CTF competition. When a challenge doesn't fit cleanly into web exploitation, binary exploitation, cryptography, or forensics, it lands here — and that makes it one of the most unpredictable and creative categories you'll encounter. Misc challenges reward curiosity, lateral thinking, and a willingness to chase rabbit holes. Whether you're stalking a fictional persona across the internet, disassembling a mystery binary, or untangling a logic puzzle written in an esoteric programming language, the misc category keeps you on your toes.
+
+## What to Expect
+
+Misc challenges span an enormous range of difficulty and domain. Some are solvable in minutes with the right Google search; others demand hours of scripting and creative problem-solving. The common thread is that they all require you to think beyond a single well-defined discipline.
+
+Here's what you'll typically find inside the misc category:
+
+- **OSINT (Open Source Intelligence):** Geolocate a photo, track down a username, find a deleted webpage, or profile a fictional target using only publicly available information.
+- **Reverse Engineering:** Analyze a compiled binary, decompile obfuscated code, patch a check routine, or reconstruct an algorithm from assembly output.
+- **Scripting and Programming Challenges:** Automate a solution to a math puzzle, interact with a remote service under tight time constraints, or brute-force a keyspace too large to handle manually.
+- **Trivia and Research:** Answer questions about niche technical topics, historical events in hacking culture, or specific CVE details.
+- **Creative Puzzles:** Steganography in unexpected places, custom encoding schemes, ARG-style multi-step hunts, and challenges that blur the line between CTF and real-world investigation.
+
+<Tip>
+Read the challenge description carefully — twice. Misc challenges often hide the most important hint in plain sight inside the flavor text. A fictional company name, a username, a date, or a file format mentioned offhand can be the entire key to the solution.
+</Tip>
+
+## Pages in This Section
+
+<CardGroup cols={2}>
+  <Card title="OSINT" icon="magnifying-glass" href="/writeups/misc/osint">
+    Learn how to geolocate images, enumerate usernames, run Google dorks, extract EXIF metadata, and use Shodan and the Wayback Machine to track down hidden flags.
+  </Card>
+  <Card title="Reverse Engineering" icon="microchip" href="/writeups/misc/reverse-engineering">
+    Walk through static and dynamic binary analysis using Ghidra and GDB, patch binaries to bypass checks, and re-implement obfuscated algorithms in Python.
+  </Card>
+</CardGroup>
+
+## General Strategies for Misc Challenges
+
+Before diving into specific techniques, a few principles apply across the entire misc category.
+
+<Tip>
+Think outside the box. Misc challenge authors deliberately avoid obvious solutions. If your first instinct doesn't pan out, step back and ask what else the challenge description could be pointing at.
+</Tip>
+
+**Start broad, then narrow.** Run every generic recon tool you have on the provided artifact before committing to a specific theory. Run `file`, `strings`, and `exiftool` on any binary or image before doing anything else. A challenge that looks like reverse engineering might actually be a steganography challenge hiding in plain sight.
+
+**Google everything.** Unusual strings, encoded blobs, file magic bytes, error messages — paste them all into a search engine. CTF challenge authors frequently reuse or reference real-world techniques, tools, and past challenges. Someone may have written a blog post that cracks open the exact encoding you're staring at.
+
+<Tip>
+Don't be afraid to Google the challenge title itself, especially if it's a named technique or tool. Many misc challenges are essentially tutorials in disguise, designed to introduce you to a real-world investigative or analysis method.
+</Tip>
+
+**Automate the tedious parts.** If a challenge requires checking 500 usernames, 1000 offsets, or iterating through every printable ASCII character, write a script. Python is your best friend in the misc category — fast to write, rich in libraries, and flexible enough to glue unrelated tools together.
+
+<Note>
+Many misc challenges are deliberately open-ended to prevent a single intended solution path. If the challenge has no obvious entry point, try enumerating everything you've been given: filenames, metadata, timestamps, encoding hints in the description, and even the challenge author's handle.
+</Note>
+
+**Collaborate and take breaks.** Misc challenges are notorious for producing tunnel vision. If you've been staring at the same artifact for an hour without progress, explain the challenge out loud to a teammate — the act of articulating it often surfaces the insight you were missing.

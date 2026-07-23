@@ -1,0 +1,96 @@
+---
+title: "Submit a CTF Writeup"
+sidebarTitle: "Contributing"
+description: "Learn how to contribute your own CTF challenge solutions, follow the writeup format, and share techniques with the community."
+---
+
+Every writeup on this site was written by a competitor who solved a challenge and took the time to explain it for others. If you've captured a flag and worked out why the exploit succeeded, your writeup belongs here. Contributing doesn't require perfect prose or an elegant one-liner — it requires an honest, step-by-step account of what you did, what failed, and what finally worked. The most useful writeups are often the messy ones that document dead ends, because that's where the real learning happens for the reader.
+
+## What to Include in Your Writeup
+
+A complete submission gives readers everything they need to reproduce your solution from scratch. Before you start writing, make sure you have the following information on hand.
+
+- **Challenge name and CTF event** — the exact name used on the scoreboard and the competition name with year (e.g., *picoCTF 2024*, *DEF CON CTF Qualifier 2023*).
+- **Category and difficulty** — the official category and point value or a subjective difficulty rating (Easy / Medium / Hard) if points aren't available.
+- **Challenge description** — the original prompt as shown to competitors, including any hints released during the event.
+- **Provided files** — attach or link any binaries, source code, packet captures, or images that were distributed with the challenge.
+- **Step-by-step solution** — walk through your thought process in order, including reconnaissance, failed attempts, and the final exploit.
+- **Exploit code** — include all scripts needed to reproduce the flag, with inline comments explaining non-obvious lines.
+- **The flag** — show the complete flag exactly as submitted.
+- **Key takeaways** — summarize the core technique and suggest one or two resources for further reading.
+
+## Frontmatter Format
+
+Every writeup file must open with YAML frontmatter that populates the page metadata and sidebar. Use the template below and fill in each field — don't leave any field empty or set to a placeholder value.
+
+```yaml
+---
+title: "Challenge Name — CTF Event Year"
+sidebarTitle: "Challenge Name"
+description: "One- or two-sentence summary of the vulnerability class and what makes this challenge interesting. 130–155 characters."
+category: "web"          # web | crypto | pwn | forensics | misc
+difficulty: "medium"     # easy | medium | hard
+ctf: "picoCTF 2024"
+points: 300
+solves: 142              # number of teams that solved it during the competition
+flag: "picoCTF{example_flag_value}"
+tools:
+  - Burp Suite
+  - Python 3
+  - pwntools
+---
+```
+
+<Tip>
+  Include a working exploit script even if the challenge infrastructure is no longer online. Attach the original binary or source files alongside your writeup so readers can run your script locally and verify the output themselves. A writeup without reproducible code is far less valuable to the community than one with a fully annotated, runnable exploit.
+</Tip>
+
+## Submission Process
+
+Follow these steps to submit your writeup from draft to published.
+
+<Steps>
+  <Step title="Fork the Repository">
+    Fork the [writeups GitHub repository](https://github.com/example/ctf-writeups) to your own account. Clone your fork locally and create a new branch named after the challenge: `git checkout -b writeup/picoctf-2024-challenge-name`.
+  </Step>
+  <Step title="Create the Writeup File">
+    Place your MDX file in the correct category subdirectory: `writeups/web/`, `writeups/crypto/`, `writeups/pwn/`, `writeups/forensics/`, or `writeups/misc/`. Name the file using lowercase kebab-case matching the challenge name, for example `writeups/web/my-challenge-name.mdx`. Place any associated files (binaries, scripts, captures) in a folder with the same name: `writeups/web/my-challenge-name/`.
+  </Step>
+  <Step title="Write and Format Your Writeup">
+    Follow the frontmatter template above and the five-part structure described in [How to Use](/how-to-use): challenge description, reconnaissance, exploitation, flag capture, and key takeaways. Use fenced code blocks with language tags for all commands and scripts. Run `npx mintlify dev` locally to preview your page and check for rendering issues before submitting.
+  </Step>
+  <Step title="Open a Pull Request">
+    Push your branch and open a pull request against the `main` branch of the upstream repository. Use the PR title format `[Category] Challenge Name — CTF Event Year`, for example `[Web] Login Bypass — picoCTF 2024`. Fill in the PR template: confirm that your exploit reproduces the flag, that all code blocks have language tags, and that the frontmatter is complete.
+  </Step>
+  <Step title="Respond to Review Feedback">
+    A maintainer will review your writeup within a few days. They may ask you to clarify a step, add context to a code snippet, or restructure a section for readability. Address each comment with a new commit on your branch — the PR updates automatically. Once approved, your writeup is merged and goes live immediately.
+  </Step>
+</Steps>
+
+## Style Guidelines
+
+Consistent formatting makes writeups easier to read and maintain. Follow these rules when writing your submission.
+
+- Write in **second person** ("you open the source code", "you notice the cookie is base64-encoded").
+- Use **active voice** and **imperative mood** for instructions ("run the script", "inspect the response headers").
+- Include **command output** as fenced code blocks so readers can verify they're on the right track.
+- Annotate every non-obvious line in exploit scripts with an inline comment.
+- Avoid phrases like "it's easy to see" or "obviously" — what's obvious to you may not be obvious to your reader.
+
+```python
+from pwn import *
+
+# Connect to the local binary for testing; use REMOTE flag for the live server
+io = process("./vuln") if not args.REMOTE else remote("challenge.example.com", 4444)
+
+# Overflow the buffer (64 bytes) and overwrite the saved return address
+payload  = b"A" * 64          # padding to reach the return address
+payload += p64(0xdeadbeef)    # address of the win() function (found with `nm ./vuln`)
+
+io.sendlineafter(b"Input: ", payload)
+io.interactive()
+```
+
+<Warning>
+  Do not submit writeups for challenges from competitions that are still active. Publishing solutions while a CTF is running undermines the competition for other participants. Check the competition's end date on [CTFtime.org](https://ctftime.org) before opening your pull request.
+</Warning>

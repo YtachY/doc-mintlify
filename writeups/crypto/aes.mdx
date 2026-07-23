@@ -1,0 +1,378 @@
+---
+title: "AES CTF Writeup: Mode Vulnerabilities and Key Recovery"
+sidebarTitle: "AES"
+description: "AES CTF walkthrough covering ECB mode block patterns, CBC padding oracle attacks, IV reuse, and CTR mode keystream reuse exploitation."
+---
+
+AES itself has never been broken. Every AES challenge you encounter in a CTF is attacking something else: the mode of operation, the initialization vector, the padding scheme, or the way the cipher is wired into a larger application. Your first job on any AES challenge is to identify the mode (`ECB`, `CBC`, `CTR`, `GCM`, etc.) and the key/IV management strategy. Once you know the mode, the attack surface becomes obvious. This walkthrough covers the four most common vulnerability classes you'll see, with working Python code for each.
+
+## Identifying the Mode
+
+Before you can attack AES, you need to know which mode you're dealing with. If source code is provided, read it — the mode is always explicit in the cipher constructor. If you only have a black-box oracle, you can often fingerprint the mode empirically.
+
+```python
+from Crypto.Cipher import AES
+from Crypto.Util.Padding import pad
+
+# Fingerprint ECB vs CBC:
+# Submit two identical 16-byte blocks and check whether the output blocks match
+def detect_ecb(ciphertext: bytes) -> bool:
+    """Return True if the ciphertext was encrypted with ECB mode."""
+    blocks = [ciphertext[i:i+16] for i in range(0, len(ciphertext), 16)]
+    return len(blocks) != len(set(blocks))
+
+# Example: encrypt a known input and check for repeating blocks
+plaintext = b'A' * 48  # three identical 16-byte blocks
+# ... submit to oracle, receive ciphertext ...
+# if detect_ecb(ciphertext): mode is ECB
+```
+
+<Note>
+ECB mode is the only common AES mode where encrypting identical plaintext blocks always produces identical ciphertext blocks. If you see duplicate 16-byte chunks in any ciphertext, you're dealing with ECB.
+</Note>
+
+## Attack Workflow
+
+<Steps>
+  <Step title="Identify the Mode and Obtain an Oracle">
+    Determine whether you have an encryption oracle, decryption oracle, or both. Read any provided source code to find the mode, key, and IV handling. Note whether the IV is fixed, random-per-session, or (dangerously) equal to the key.
+  </Step>
+
+  <Step title="Select Your Attack">
+    Match the mode and oracle type to the appropriate attack class. Use the tabs below for detailed instructions on ECB, CBC, and CTR attacks.
+  </Step>
+
+  <Step title="Execute and Collect Data">
+    Most AES attacks require multiple oracle queries. Automate your data collection early — even a simple loop that queries the oracle and saves responses will save time.
+
+    ```python
+    import requests
+
+    def oracle_encrypt(plaintext: bytes) -> bytes:
+        """Query the challenge's encryption oracle."""
+        resp = requests.post(
+            'http://challenge.ctf.example/encrypt',
+            json={'plaintext': plaintext.hex()}
+        )
+        return bytes.fromhex(resp.json()['ciphertext'])
+    ```
+  </Step>
+
+  <Step title="Recover the Plaintext or Key">
+    Apply the relevant attack algorithm to reconstruct the plaintext, recover the key, or forge a valid ciphertext depending on what the challenge requires.
+  </Step>
+
+  <Step title="Extract the Flag">
+    Decode the recovered bytes and look for your flag format. Some challenges require you to forge a specific ciphertext (e.g., `role=admin`) rather than decrypt an existing one.
+  </Step>
+</Steps>
+
+## AES Mode Attacks
+
+<Tabs>
+  <Tab title="ECB Patterns">
+    ECB (Electronic Code Book) mode encrypts each 16-byte block independently with the same key. This means identical plaintext blocks always produce identical ciphertext blocks — a critical information leak.
+
+    ### Detection
+
+    Encrypt 48 bytes of identical data (three full blocks). If two or more output blocks are identical, the oracle is using ECB.
+
+    ```python
+    from Crypto.Cipher import AES
+    from Crypto.Util.Padding import pad
+
+    key = b'\x00' * 16  # known key for local testing
+
+    def ecb_encrypt(plaintext: bytes, key: bytes) -> bytes:
+        cipher = AES.new(key, AES.MODE_ECB)
+        return cipher.encrypt(pad(plaintext, 16))
+
+    # Three identical blocks produce three identical ciphertext blocks
+    ct = ecb_encrypt(b'A' * 48, key)
+    blocks = [ct[i:i+16] for i in range(0, len(ct), 16)]
+    print(blocks[0] == blocks[1] == blocks[2])  # True
+    ```
+
+    ### Byte-at-a-Time Oracle Attack
+
+    If the oracle appends a secret to your input before encrypting (`AES_ECB(your_input || secret)`), you can recover the secret one byte at a time.
+
+    ```python
+    def ecb_byte_at_a_time(oracle_fn):
+        """
+        Recover a secret suffix from an ECB encryption oracle.
+        oracle_fn(plaintext) -> ciphertext
+        """
+        # Step 1: Determine block size by growing input until ciphertext jumps
+        base_len = len(oracle_fn(b''))
+        block_size = None
+        for i in range(1, 33):
+            ct_len = len(oracle_fn(b'A' * i))
+            if ct_len > base_len:
+                block_size = ct_len - base_len
+                break
+
+        secret_len = base_len  # approximate
+        known = b''
+
+        for i in range(secret_len):
+            # Pad so that the next unknown byte falls at a block boundary
+            padding = b'A' * (block_size - 1 - (i % block_size))
+            target_block_idx = i // block_size
+            target = oracle_fn(padding)[
+                target_block_idx * block_size : (target_block_idx + 1) * block_size
+            ]
+
+            # Brute-force the unknown byte
+            for candidate in range(256):
+                probe = padding + known + bytes([candidate])
+                ct = oracle_fn(probe)
+                block = ct[target_block_idx * block_size : (target_block_idx + 1) * block_size]
+                if block == target:
+                    known += bytes([candidate])
+                    break
+
+        return known
+    ```
+
+    <Tip>
+      This attack requires exactly `block_size * secret_length` oracle queries in the worst case. For a 16-byte flag, that's at most 4,096 requests — fast enough to run interactively.
+    </Tip>
+  </Tab>
+
+  <Tab title="CBC Padding Oracle">
+    CBC (Cipher Block Chaining) mode XORs each plaintext block with the previous ciphertext block before encryption. Decryption reverses this with XOR after AES. If the server tells you (even indirectly) whether a decrypted ciphertext has valid PKCS#7 padding, you can decrypt any ciphertext block-by-block without the key.
+
+    ### How the Attack Works
+
+    For each target block `C[i]`, you manipulate the preceding block `C[i-1]` bit by bit. When the server returns "valid padding," you've found the intermediate decryption value `D[i]`. XOR that with the original `C[i-1]` to recover `P[i]`.
+
+    ```python
+    def padding_oracle_decrypt(oracle_fn, ciphertext: bytes, block_size: int = 16) -> bytes:
+        """
+        Decrypt ciphertext using a padding oracle.
+        oracle_fn(ciphertext) -> True if padding valid, False otherwise
+        Ciphertext must include the IV as the first block.
+        """
+        blocks = [ciphertext[i:i+block_size] for i in range(0, len(ciphertext), block_size)]
+        plaintext = b''
+
+        for block_idx in range(1, len(blocks)):
+            target_block = blocks[block_idx]
+            prev_block   = bytearray(blocks[block_idx - 1])
+            intermediate  = bytearray(block_size)
+
+            # Recover each byte from right to left
+            for byte_pos in range(block_size - 1, -1, -1):
+                padding_byte = block_size - byte_pos
+
+                # Fix already-recovered bytes to produce correct padding
+                modified_prev = bytearray(block_size)
+                for k in range(byte_pos + 1, block_size):
+                    modified_prev[k] = intermediate[k] ^ padding_byte
+
+                # Brute-force the current byte
+                found = False
+                for guess in range(256):
+                    modified_prev[byte_pos] = guess
+                    probe = bytes(modified_prev) + target_block
+                    if oracle_fn(probe):
+                        intermediate[byte_pos] = guess ^ padding_byte
+                        found = True
+                        break
+
+                if not found:
+                    raise ValueError(f"Oracle failed at block {block_idx}, byte {byte_pos}")
+
+            # XOR intermediate with original previous block to get plaintext
+            p = bytes(i ^ j for i, j in zip(intermediate, blocks[block_idx - 1]))
+            plaintext += p
+
+        # Strip PKCS#7 padding
+        pad_len = plaintext[-1]
+        return plaintext[:-pad_len]
+    ```
+
+    <Warning>
+      The oracle must be consistent: it must accept *any* ciphertext and return a reliable padding-valid / padding-invalid signal. If the server crashes, times out differently, or returns an ambiguous error for invalid padding, adapt your oracle wrapper to handle those cases.
+    </Warning>
+
+    ### CBC Bit Flipping (Forging Ciphertext)
+
+    If you can control plaintext and want a specific value to appear in the decrypted output, flip bits in `C[i-1]` to manipulate `P[i]`. Changing bit `j` of `C[i-1]` flips bit `j` of `P[i]`.
+
+    ```python
+    def cbc_bit_flip(ciphertext: bytes, target_block: int,
+                     byte_offset: int, original: int, desired: int) -> bytes:
+        """
+        Flip a single byte in decrypted block `target_block`.
+        Modifies the byte at `byte_offset` in block `target_block - 1`.
+        """
+        ct = bytearray(ciphertext)
+        # XOR flips: desired ^ original flips from `original` to `desired`
+        ct[(target_block - 1) * 16 + byte_offset] ^= original ^ desired
+        return bytes(ct)
+
+    # Example: force ';admin=true;' into block 2 of decrypted output
+    # First, submit a plaintext where the target characters are at known positions
+    # Then flip the corresponding bytes in block 1 of the ciphertext
+    ```
+  </Tab>
+
+  <Tab title="IV = Key">
+    Some poorly written CBC implementations reuse the key as the IV. This is catastrophic: you can recover the key with three carefully chosen oracle queries.
+
+    The attack exploits the CBC decryption formula: `P[0] = D(C[0]) XOR IV`. If `IV == key`, and you can get the server to decrypt a crafted ciphertext and then encrypt a known plaintext, you leak the key.
+
+    ```python
+    def recover_key_from_iv_equals_key(encrypt_fn, decrypt_fn, block_size: int = 16):
+        """
+        Recover the AES key when IV == key.
+        encrypt_fn(plaintext) -> ciphertext  (IV = key prepended or known to be key)
+        decrypt_fn(ciphertext) -> plaintext  (server decrypts and returns result)
+        """
+        # Step 1: Encrypt a known plaintext — get C[0], C[1], C[2]
+        plaintext = b'A' * (block_size * 3)
+        ciphertext = encrypt_fn(plaintext)
+
+        C0 = ciphertext[0:block_size]
+        C1 = ciphertext[block_size:block_size*2]
+
+        # Step 2: Craft a new ciphertext: C[0] || 0x00...00 || C[0]
+        null_block = b'\x00' * block_size
+        crafted_ct = C0 + null_block + C0
+
+        # Step 3: Decrypt the crafted ciphertext
+        decrypted = decrypt_fn(crafted_ct)
+        P0_prime = decrypted[0:block_size]
+        P2_prime = decrypted[block_size*2:block_size*3]
+
+        # Step 4: key = IV = P'[0] XOR P'[2]
+        key = bytes(a ^ b for a, b in zip(P0_prime, P2_prime))
+        return key
+    ```
+
+    <Note>
+      This attack only works when the **same key** is used as **both the AES key and the IV**. It's rare in real deployments but appears regularly in CTF challenges because it's a subtle mistake to spot in code review.
+    </Note>
+  </Tab>
+
+  <Tab title="CTR Keystream Reuse">
+    CTR (Counter) mode turns AES into a stream cipher: it encrypts successive counter values and XORs the result with plaintext. This is perfectly secure as long as the `(key, nonce)` pair is never reused. If two different plaintexts are encrypted with the same keystream, XORing the ciphertexts cancels the keystream out:
+
+    ```
+    c1 = p1 XOR keystream
+    c2 = p2 XOR keystream
+    c1 XOR c2 = p1 XOR p2
+    ```
+
+    If you know (or can guess) any part of `p1`, you can recover the corresponding part of `p2` — and vice versa.
+
+    ### Detecting Keystream Reuse
+
+    ```python
+    # If two ciphertexts share a keystream: c1 XOR c2 = p1 XOR p2
+    c1 = bytes.fromhex('...')  # first ciphertext
+    c2 = bytes.fromhex('...')  # second ciphertext (same key and nonce)
+
+    xored = bytes(a ^ b for a, b in zip(c1, c2))
+    # xored now equals p1 XOR p2 — use known-plaintext to peel apart
+    print(xored)
+    ```
+
+    ### Recovering the Keystream from Known Plaintext
+
+    ```python
+    from Crypto.Cipher import AES
+    import struct
+
+    def recover_keystream(known_plaintext: bytes, ciphertext: bytes) -> bytes:
+        """Recover the keystream bytes where plaintext is known."""
+        return bytes(p ^ c for p, c in zip(known_plaintext, ciphertext))
+
+    def decrypt_with_keystream(keystream: bytes, ciphertext: bytes) -> bytes:
+        """Apply recovered keystream to decrypt another ciphertext."""
+        return bytes(k ^ c for k, c in zip(keystream, ciphertext))
+
+    # If you know p1 fully, recover the entire keystream
+    known_p1 = b'the quick brown fox jumps over the'
+    keystream = recover_keystream(known_p1, c1)
+
+    # Use it to decrypt c2 up to len(keystream) bytes
+    partial_p2 = decrypt_with_keystream(keystream, c2)
+    print(partial_p2)
+    ```
+
+    ### Multi-Ciphertext Crib Dragging
+
+    When you have many ciphertexts sharing a keystream but no known plaintext, use crib dragging: guess a common word or phrase, XOR it against the XOR of two ciphertexts at each position, and look for readable output.
+
+    ```python
+    def crib_drag(c1: bytes, c2: bytes, crib: bytes) -> list:
+        """
+        Try sliding `crib` across c1 XOR c2 to find positions where
+        c1[pos:] XOR crib produces printable ASCII (likely p2 fragment).
+        """
+        xored = bytes(a ^ b for a, b in zip(c1, c2))
+        results = []
+        for pos in range(len(xored) - len(crib) + 1):
+            candidate = bytes(x ^ y for x, y in zip(xored[pos:], crib))
+            if all(32 <= b < 127 for b in candidate):
+                results.append((pos, candidate))
+        return results
+
+    hits = crib_drag(c1, c2, b' the ')
+    for pos, fragment in hits:
+        print(f"Position {pos}: {fragment}")
+    ```
+
+    <Tip>
+      Start crib dragging with common English words and flag format strings like `CTF{`, `flag`, ` the `, ` and `. Each confirmed crib position reveals more keystream bytes, which you can use to extend your knowledge of all ciphertexts in the set.
+    </Tip>
+  </Tab>
+</Tabs>
+
+## Local Testing Setup
+
+Use this template to reproduce any of the attacks locally before targeting the challenge server.
+
+```python
+from Crypto.Cipher import AES
+from Crypto.Util.Padding import pad, unpad
+from Crypto.Random import get_random_bytes
+
+# ----- CBC padding oracle simulation -----
+KEY = get_random_bytes(16)
+IV  = get_random_bytes(16)
+
+def cbc_encrypt(plaintext: bytes) -> bytes:
+    cipher = AES.new(KEY, AES.MODE_CBC, iv=IV)
+    return IV + cipher.encrypt(pad(plaintext, 16))
+
+def cbc_padding_oracle(ciphertext: bytes) -> bool:
+    """Return True if ciphertext decrypts to valid PKCS#7 padding."""
+    iv   = ciphertext[:16]
+    body = ciphertext[16:]
+    try:
+        cipher = AES.new(KEY, AES.MODE_CBC, iv=iv)
+        unpad(cipher.decrypt(body), 16)
+        return True
+    except ValueError:
+        return False
+
+# Encrypt a secret, then decrypt it using only the oracle
+secret   = b'CTF{padding_oracle_rocks}'
+ct       = cbc_encrypt(secret)
+recovered = padding_oracle_decrypt(cbc_padding_oracle, ct)
+print(recovered)
+```
+
+## Quick Reference
+
+| Mode | Vulnerability | Attack |
+|---|---|---|
+| ECB | Identical blocks leak plaintext structure | Pattern analysis, byte-at-a-time oracle |
+| CBC | Padding validation leaks decryption info | Padding oracle, bit flipping |
+| CBC | IV equals key | Three-query key recovery |
+| CTR / GCM | Nonce reuse | XOR cancellation, crib dragging |
+| Any | Fixed IV with changing plaintext | Keystream recovery |

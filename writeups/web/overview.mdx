@@ -1,0 +1,73 @@
+---
+title: "Web Exploitation CTF Challenges: Techniques & Writeups"
+sidebarTitle: "Overview"
+description: "Explore web exploitation CTF challenges covering SQL injection, XSS, SSRF, and more. Learn how to identify and exploit web vulnerabilities."
+---
+
+Web exploitation is one of the most popular and accessible categories in CTF competitions. Unlike binary exploitation or cryptography, web challenges let you interact with something familiar — a browser, a form, a URL — but reward you for pushing those interfaces far beyond their intended use. Whether you're staring down a login page hiding an injection vulnerability or unraveling a multi-step authentication bypass, web CTF challenges teach you to think like an attacker against real-world technologies.
+
+## What Makes Web Challenges Unique
+
+Web exploitation sits at the intersection of creativity and methodology. A few properties make it stand apart from other CTF categories:
+
+- **Black-box testing by default.** Many web challenges give you nothing but a URL. You have to discover structure, identify technologies, and find vulnerabilities purely through observation and probing — just like a real-world attacker would.
+- **Source code when you're lucky.** Some challenges provide application source, shifting the task from discovery to auditing. Reading code for logic flaws, insecure deserialization, or hardcoded secrets is a skill of its own.
+- **Vulnerability chaining.** The most interesting web flags aren't won with a single payload. You might use SSRF to reach an internal service, then exploit an injection vulnerability on that service to read a file, then decode a response to reveal the flag. Each step unlocks the next.
+- **Diverse tech stacks.** PHP, Node.js, Python Flask/Django, Ruby on Rails, Java Spring — web challenges span every major framework, so breadth of knowledge pays off.
+
+## Sub-Categories Covered
+
+The writeups in this section walk through the most common and instructive web exploitation techniques you'll encounter in CTFs. Each page includes a realistic challenge scenario, step-by-step exploitation, and the reasoning behind every decision.
+
+<CardGroup cols={2}>
+  <Card title="SQL Injection" icon="database" href="/writeups/web/sql-injection">
+    Extract databases, bypass authentication, and dump flag tables using UNION-based, blind boolean, and time-based injection techniques — manually and with sqlmap.
+  </Card>
+  <Card title="Cross-Site Scripting (XSS)" icon="code" href="/writeups/web/xss">
+    Craft reflected, stored, and DOM-based XSS payloads to steal cookies, hijack admin bot sessions, and bypass Content Security Policy restrictions.
+  </Card>
+  <Card title="Server-Side Request Forgery" icon="server" href="/writeups/web/ssrf">
+    Abuse URL-fetching functionality to probe internal services, read cloud metadata endpoints, and chain SSRF with other bugs to capture the flag.
+  </Card>
+  <Card title="More Coming Soon" icon="clock" href="/writeups/web/overview">
+    Additional writeups covering IDOR, path traversal, deserialization, and authentication bypass are in progress.
+  </Card>
+</CardGroup>
+
+## General Approach to Web Challenges
+
+Before diving into any specific technique, adopt a consistent reconnaissance routine. The first few minutes you spend on a web challenge should always follow the same checklist — this prevents you from missing obvious entry points while chasing complex ones.
+
+### Reconnaissance Checklist
+
+<Tip>
+  Always check `/robots.txt` and `/sitemap.xml` first. Challenge authors frequently hide disallowed paths, admin endpoints, or backup file locations there. It takes five seconds and occasionally hands you the flag immediately.
+</Tip>
+
+<Tip>
+  View the page source (`Ctrl+U`) and read every comment, hidden input, and script tag. Developers leave debug notes, API keys, and endpoint references in HTML far more often than you'd expect — and CTF challenge authors replicate this intentionally.
+</Tip>
+
+<Tip>
+  Run all traffic through **Burp Suite** from the moment you open the challenge. Burp's proxy lets you inspect and replay every request, modify headers and cookies, and use the Intruder and Repeater tools for systematic fuzzing. Setting it up after you've already clicked around means you've already missed data.
+</Tip>
+
+<Tip>
+  **Fuzz every parameter** — query strings, form fields, headers like `X-Forwarded-For` and `Referer`, and JSON body keys. Tools like `ffuf` and `wfuzz` let you iterate over wordlists quickly. Unexpected responses (different status codes, error messages, timing differences) are your signal that something interesting is happening.
+</Tip>
+
+### Technology Fingerprinting
+
+Identify the stack before you attack it. Check response headers (`Server`, `X-Powered-By`, `Set-Cookie` session token format), look at file extensions in URLs, and read error messages carefully — stack traces are gifts. Knowing you're on PHP 7.4 with a MySQL backend versus a Node.js/MongoDB stack changes which payloads you reach for first.
+
+### Building Your Methodology
+
+No two web challenges are identical, but the most successful competitors follow a disciplined loop:
+
+1. **Map the attack surface** — find every input, every endpoint, every parameter.
+2. **Form a hypothesis** — what vulnerability class fits what you see?
+3. **Test minimally** — send the simplest possible probe before escalating complexity.
+4. **Read error feedback** — verbose errors are more useful than silent failures; learn to generate them.
+5. **Chain findings** — a low-severity bug on one endpoint might be the key that unlocks a critical one elsewhere.
+
+Consistency beats inspiration in web exploitation. Build the habit of exhausting your checklist before jumping to advanced techniques, and you'll solve more challenges in less time.

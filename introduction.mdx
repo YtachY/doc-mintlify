@@ -1,0 +1,49 @@
+---
+title: "What Are CTF Writeups?"
+sidebarTitle: "Introduction"
+description: "Learn what CTF competitions are, how writeups help you improve, and what categories of challenges you'll find documented here."
+---
+
+Capture The Flag competitions are cybersecurity contests where participants solve security puzzles to recover hidden strings called *flags*. Each flag is typically formatted as a short token — for example, `flag{s0m3_s3cr3t_v4lu3}` — and submitting it to the competition scoreboard earns your team points. CTFs are one of the most effective ways to build practical offensive-security skills because every challenge is grounded in a real vulnerability class or technique, not a textbook abstraction.
+
+## How CTF Competitions Work
+
+CTFs come in two main formats, each requiring a different mindset and strategy.
+
+**Jeopardy-style** competitions present a board of individual challenges sorted by category and point value. Teams work independently to solve as many challenges as possible before time runs out. Points are awarded for each correct flag submission, and harder challenges carry higher point values. This is the most common format and the one covered throughout these writeups.
+
+**Attack-Defense** competitions give each team an identical server running a set of vulnerable services. Your goal is to patch your own services so opponents can't exploit them, while simultaneously exploiting the unpatched services on your opponents' servers to steal their flags. These competitions reward a blend of offensive and defensive skills and are typically run in person at larger events like DEF CON CTF.
+
+## What Is a Writeup and Why Does It Matter?
+
+A writeup is a written (or video) walkthrough that documents exactly how a competitor solved a CTF challenge after the competition ends. A good writeup explains the initial reconnaissance, the vulnerability identified, the exploit developed, and the reasoning behind every decision along the way. Reading writeups for challenges you couldn't solve — or even ones you did solve — exposes you to approaches and tools you might never have discovered on your own. Writing your own writeups reinforces your understanding and contributes knowledge back to the community.
+
+<Note>
+  Every challenge documented on this site comes from a real CTF competition. Challenge names, descriptions, and source files are preserved as closely as possible to the original so you can follow along with an authentic experience.
+</Note>
+
+## Categories Covered
+
+This site organizes writeups into five categories that mirror the standard jeopardy-style CTF board. Each category has its own overview page that explains the core concepts, lists recommended prerequisite knowledge, and links to individual challenge writeups ordered by difficulty.
+
+<CardGroup cols={2}>
+  <Card title="Web Exploitation" icon="globe" href="/writeups/web/overview">
+    Learn to exploit vulnerabilities in web applications including injection attacks, authentication bypasses, and server-side request forgery.
+  </Card>
+  <Card title="Cryptography" icon="lock" href="/writeups/crypto/overview">
+    Understand classical and modern cipher weaknesses, padding oracles, hash length extension attacks, and flawed random number generation.
+  </Card>
+  <Card title="Binary Exploitation" icon="bug" href="/writeups/pwn/overview">
+    Study memory corruption vulnerabilities in compiled binaries, including stack overflows, use-after-free bugs, and return-oriented programming.
+  </Card>
+  <Card title="Forensics" icon="magnifying-glass" href="/writeups/forensics/overview">
+    Analyze packet captures, file system images, memory dumps, and steganographic media to uncover hidden or deleted information.
+  </Card>
+  <Card title="Miscellaneous" icon="puzzle-piece" href="/writeups/misc/overview">
+    Tackle challenges that span multiple disciplines or don't fit neatly elsewhere — scripting puzzles, OSINT tasks, jail escapes, and more.
+  </Card>
+</CardGroup>
+
+## Who These Writeups Are For
+
+You don't need to be an expert to benefit from these writeups. Beginners will find that the web and cryptography sections introduce core concepts gently, with each solution explained from first principles. Intermediate competitors will find binary exploitation and forensics writeups that assume familiarity with tools like GDB and Wireshark but still walk through every non-obvious step. Advanced readers can skip the background prose and focus on the exploit scripts and key takeaways at the end of each page. Wherever you are in your journey, there's something here to sharpen your skills.

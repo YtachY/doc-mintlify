@@ -1,0 +1,234 @@
+---
+title: "Set Up Your CTF Hacking Environment"
+sidebarTitle: "Environment"
+description: "Configure a safe, isolated environment for practicing CTF challenges including virtual machines, Docker containers, and OS recommendations."
+---
+
+Before you touch a single challenge, you need a dedicated environment that keeps your host machine safe, gives you access to specialized security tools, and ensures you're always operating within legal and ethical boundaries. Running exploit code, fuzzing binaries, or intercepting network traffic directly on your everyday machine risks corrupting your system, triggering antivirus software, or accidentally targeting infrastructure you don't own. An isolated environment solves all three problems at once: it sandboxes dangerous tooling, comes pre-loaded with the utilities CTF players rely on, and makes it trivially easy to reset to a clean state between competitions.
+
+<Warning>
+  Never run exploit code, port scanners, or any offensive security tool against systems, networks, or services you do not explicitly own or have written permission to test. CTF challenges are hosted on dedicated lab infrastructure — always confirm you are targeting the correct IP range or domain before executing anything.
+</Warning>
+
+## Why isolation matters
+
+A CTF environment differs from a normal development setup in three important ways:
+
+- **Safety** — Exploits, shellcode, and malware samples can behave unpredictably. Containing them inside a VM or container means a worst-case scenario destroys a throwaway image, not your laptop.
+- **Tool availability** — Security tools like Metasploit, Ghidra, and pwntools conflict with or are unavailable on stock operating systems. Purpose-built distros ship everything pre-configured.
+- **Legal clarity** — Keeping all CTF activity inside a clearly scoped environment helps you maintain a clean boundary between sanctioned competition work and everyday computing.
+
+## Choose your environment
+
+Pick the option that best fits your hardware and workflow. Kali Linux in a VM is the most common choice for beginners; Docker suits experienced users who want a lightweight, reproducible setup.
+
+<Tabs>
+  <Tab title="Kali Linux VM">
+    Kali Linux is the industry-standard penetration testing distribution maintained by Offensive Security. It ships with over 600 pre-installed security tools and receives frequent updates. Running it inside VirtualBox or VMware gives you a full graphical desktop while keeping it completely isolated from your host OS.
+
+    <Steps>
+      <Step title="Download a hypervisor">
+        Install [VirtualBox](https://www.virtualbox.org/wiki/Downloads) (free) or [VMware Workstation Player](https://www.vmware.com/products/workstation-player.html) (free for personal use) on your host machine. VirtualBox works on Windows, macOS, and Linux.
+      </Step>
+      <Step title="Download the Kali Linux VM image">
+        Go to [kali.org/get-kali](https://www.kali.org/get-kali/#kali-virtual-machines) and download the pre-built VirtualBox or VMware image. These are ready-to-import `.ova` or `.vmx` files — no manual installation required.
+
+        ```bash
+        # Verify the SHA256 checksum after downloading (replace filename as needed)
+        sha256sum kali-linux-2024.2-virtualbox-amd64.ova
+        ```
+      </Step>
+      <Step title="Import the VM">
+        Open VirtualBox and select **File → Import Appliance**, then point it at the downloaded `.ova` file. Accept the default settings or increase RAM to at least 4 GB and CPUs to 2 for comfortable performance.
+      </Step>
+      <Step title="Boot and log in">
+        Start the VM. The default credentials for the pre-built image are:
+
+        ```
+        Username: kali
+        Password: kali
+        ```
+
+        Change the password immediately after first login.
+
+        ```bash
+        passwd
+        ```
+      </Step>
+      <Step title="Update the system">
+        Before starting any challenge, pull the latest package updates to ensure your tools are current.
+
+        ```bash
+        sudo apt update && sudo apt full-upgrade -y
+        ```
+      </Step>
+      <Step title="Install VirtualBox Guest Additions (optional but recommended)">
+        Guest Additions enable clipboard sharing, drag-and-drop, and auto-resizing of the VM display — all of which make day-to-day use much smoother.
+
+        ```bash
+        sudo apt install -y virtualbox-guest-x11
+        sudo reboot
+        ```
+      </Step>
+    </Steps>
+
+    <Tip>
+      Take a VM snapshot right after the initial setup and update. If a challenge corrupts your environment or you want a clean slate for the next competition, you can roll back in seconds without reinstalling.
+    </Tip>
+  </Tab>
+
+  <Tab title="Parrot OS">
+    Parrot OS is a Debian-based security distribution that is lighter on resources than Kali and ships a "Security" edition aimed directly at CTF players and penetration testers. It also includes a "Home" edition if you prefer a daily-driver OS with security tools bolted on. Parrot's default desktop environment (MATE) runs comfortably on machines with as little as 2 GB of RAM.
+
+    **Download and import the VM image**
+
+    Head to [parrotsec.org/download](https://www.parrotsec.org/download/) and grab the **Security** edition OVA for your hypervisor.
+
+    ```bash
+    # Import via VirtualBox CLI if you prefer the terminal
+    VBoxManage import Parrot-security-6.1_amd64.ova \
+      --vsys 0 --memory 4096 --cpus 2
+    ```
+
+    **First-boot configuration**
+
+    ```bash
+    # Update all packages
+    sudo apt update && sudo apt full-upgrade -y
+
+    # Install any missing CTF staples
+    sudo apt install -y gdb python3-pip git curl wget \
+        binwalk foremost steghide exiftool
+    ```
+
+    **Key differences from Kali**
+
+    | Feature | Kali Linux | Parrot OS Security |
+    |---|---|---|
+    | Default RAM requirement | 2 GB (4 GB recommended) | 1 GB (2 GB recommended) |
+    | Desktop environment | Xfce / GNOME | MATE |
+    | Anonymity tools | Limited | Includes AnonSurf |
+    | Rolling release | Yes | Yes |
+    | Pre-installed tools | 600+ | 600+ |
+
+    <Note>
+      Parrot OS Security and Kali Linux ship largely the same tool set. If you already have a Kali environment, there is no pressing reason to switch — Parrot is worth trying if you're on lower-spec hardware or prefer the MATE desktop.
+    </Note>
+  </Tab>
+
+  <Tab title="Docker Environment">
+    Docker gives you a reproducible, scriptable CTF environment that starts in seconds and requires no hypervisor overhead. It's ideal if you're comfortable on the command line, already have Docker installed, or want to share a consistent setup with teammates. The trade-off is that Docker containers share the host kernel, so they provide less isolation than a full VM.
+
+    **Prerequisites**
+
+    Install Docker Desktop (macOS/Windows) or the Docker Engine (Linux) from [docs.docker.com/get-docker](https://docs.docker.com/get-docker/).
+
+    ```bash
+    # Verify Docker is running
+    docker --version
+    # Docker version 26.1.0, build ...
+    ```
+
+    **Pull a ready-made CTF image**
+
+    The `ctftools` image maintained by the community bundles pwntools, pwndbg, ROPgadget, binwalk, and more into a single container.
+
+    ```bash
+    docker pull skysider/pwndocker
+    ```
+
+    **Run an interactive CTF session**
+
+    ```bash
+    docker run -it \
+      --rm \
+      --cap-add=SYS_PTRACE \
+      --security-opt seccomp=unconfined \
+      -v "$(pwd)/ctf:/ctf" \
+      skysider/pwndocker \
+      /bin/bash
+    ```
+
+    The flags break down as follows:
+    - `--cap-add=SYS_PTRACE` — allows GDB to attach to processes inside the container
+    - `--security-opt seccomp=unconfined` — permits syscalls that exploit development requires
+    - `-v "$(pwd)/ctf:/ctf"` — mounts a local folder so challenge files persist after the container exits
+
+    **Build your own Dockerfile**
+
+    For full control, maintain a `Dockerfile` in your team's repository so everyone works from the same image.
+
+    ```dockerfile
+    FROM kalilinux/kali-rolling
+
+    ENV DEBIAN_FRONTEND=noninteractive
+
+    RUN apt-get update && apt-get install -y \
+        python3 python3-pip \
+        gdb gdb-peda \
+        binwalk steghide exiftool \
+        patchelf elfutils \
+        netcat-openbsd socat \
+        git curl wget \
+        && rm -rf /var/lib/apt/lists/*
+
+    RUN pip3 install --no-cache-dir pwntools ropper
+
+    WORKDIR /ctf
+    CMD ["/bin/bash"]
+    ```
+
+    ```bash
+    # Build and tag your custom image
+    docker build -t my-ctf-env:latest .
+
+    # Run it
+    docker run -it --rm \
+      --cap-add=SYS_PTRACE \
+      --security-opt seccomp=unconfined \
+      -v "$(pwd):/ctf" \
+      my-ctf-env:latest
+    ```
+
+    <Tip>
+      Commit your `Dockerfile` to a private Git repository and tag a new image version before each major competition. That way you always have a known-good baseline and can reproduce your exact environment if something breaks mid-CTF.
+    </Tip>
+  </Tab>
+</Tabs>
+
+## Networking considerations
+
+Most CTF challenges involve network services — web servers, binary services exposed over TCP, or packet capture files. Configure your VM or container networking depending on the challenge type.
+
+<CardGroup cols={2}>
+  <Card title="NAT (default)" icon="globe">
+    The VM shares your host's internet connection. Use this for web challenges and downloading tools. Your VM can reach the internet but is not directly reachable from outside.
+  </Card>
+  <Card title="Host-only adapter" icon="lock">
+    Creates a private network between your VM and host. Use this when a challenge spins up a local service you need to connect to from your host machine, e.g., a pwn binary listening on a port.
+  </Card>
+  <Card title="Bridged adapter" icon="network-wired">
+    The VM appears as a separate device on your physical network. Useful for competitions where the challenge infrastructure is on the same LAN, such as on-site events.
+  </Card>
+  <Card title="Internal network" icon="shield">
+    Completely isolated network shared only between VMs. Ideal for multi-machine labs where you want to simulate an internal network without any host or internet access.
+  </Card>
+</CardGroup>
+
+## Keeping your environment healthy
+
+<Accordion title="How often should I update my tools?">
+  Run `sudo apt full-upgrade -y` at the start of each new CTF competition. Avoid updating mid-competition — a package upgrade can occasionally break a tool you're actively using. Snapshot your VM before upgrading so you can roll back if needed.
+</Accordion>
+
+<Accordion title="What do I do if my VM becomes unstable?">
+  Revert to your post-setup snapshot. If you haven't taken one, reinstall from the original OVA — it takes less than ten minutes. This is another strong reason to snapshot early and often.
+</Accordion>
+
+<Accordion title="Can I use WSL2 on Windows instead of a VM?">
+  Yes — WSL2 running Kali Linux (`wsl --install -d kali-linux`) is a viable lightweight alternative for many CTF categories, particularly web and cryptography. However, some binary exploitation workflows (especially those requiring specific kernel versions or GDB with ptrace) work more reliably inside a full VM. Start with WSL2 if you're on a Windows machine and don't want to deal with VirtualBox, but keep a VM available for pwn challenges.
+</Accordion>
+
+<Accordion title="How much disk space do I need?">
+  Allocate at least **40 GB** to your VM's virtual disk. Kali's base install uses roughly 12 GB, and challenge files, downloaded binaries, and tool data can grow quickly during a competition. Docker images are more economical — the base Kali image is around 500 MB, though a fully-tooled custom image typically reaches 3–5 GB.
+</Accordion>

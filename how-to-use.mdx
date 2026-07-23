@@ -1,0 +1,91 @@
+---
+title: "How to Use These CTF Writeups"
+sidebarTitle: "How to Use"
+description: "Understand how writeups are structured, how to follow along with exploit scripts, and tips for getting the most out of each solution walkthrough."
+---
+
+These writeups are designed to be worked through actively, not just read passively. Each page walks you through a real CTF challenge from the moment you first read the problem description to the moment you submit the flag, explaining every decision along the way. To get the most value, open a terminal alongside the writeup, reproduce each step yourself, and pause before reading the solution to attempt the next move on your own. The friction of struggling with a problem — even briefly — is what makes the technique stick.
+
+## Writeup Structure
+
+Every writeup on this site follows the same five-part structure so you always know where you are in the solution and can jump directly to the section you need.
+
+<Steps>
+  <Step title="Challenge Description">
+    Each writeup opens with the original challenge text, the point value, the competition it came from, and any provided files or service addresses. Read this section carefully — CTF authors often embed subtle hints in the flavor text.
+  </Step>
+  <Step title="Reconnaissance">
+    This section covers initial information gathering: inspecting source code, running `file` and `strings` on binaries, probing a web application's endpoints, or examining a packet capture's high-level statistics. Reconnaissance shapes your entire exploitation strategy, so don't skip it even when a vulnerability seems obvious at first glance.
+  </Step>
+  <Step title="Exploitation">
+    The largest section of every writeup, this is where the vulnerability is identified, the exploit is constructed, and each iteration is explained. Code snippets and command output are included inline so you can follow every step without leaving the page.
+  </Step>
+  <Step title="Flag Capture">
+    Once the exploit succeeds, this section shows the exact output that reveals the flag and explains how to format it correctly for submission. Some competitions require stripping or adding a prefix, so pay attention to the flag format noted at the top of the writeup.
+  </Step>
+  <Step title="Key Takeaways">
+    Each writeup closes with a concise summary of the core vulnerability class, the tools used, and one or two recommendations for further reading or practice. Use this section to quickly review a technique you've already studied.
+  </Step>
+</Steps>
+
+## Running Exploit Scripts
+
+Most binary exploitation and web writeups include Python exploit scripts written with [pwntools](https://docs.pwntools.com/en/stable/) or standard library modules. To run them, make sure your environment is configured (see the [Setup Guide](/setup/environment)) and then execute the script directly from your terminal.
+
+```bash
+# Install dependencies if you haven't already
+pip install pwntools requests
+
+# Run an exploit script against a local binary
+python3 exploit.py
+
+# Run against the remote competition server
+python3 exploit.py REMOTE
+```
+
+Scripts that target remote services accept a `REMOTE` argument to switch the connection target from `localhost` to the competition host and port defined at the top of the file. Always test locally first — if the binary is provided, verify that your exploit achieves the desired effect before pointing it at the remote server.
+
+```python
+from pwn import *
+
+HOST = "challenge.ctf.example.com"
+PORT = 4444
+
+if args.REMOTE:
+    io = remote(HOST, PORT)
+else:
+    io = process("./vulnerable_binary")
+
+# Rest of exploit follows...
+```
+
+## Tips for Beginners
+
+If you're new to CTFs, the sheer variety of techniques can feel overwhelming. Keep these principles in mind as you work through writeups.
+
+- **Attempt before reading.** Look at the challenge description and provided files for at least 15 minutes before opening the exploitation section. Even a wrong hypothesis builds pattern recognition.
+- **Reproduce every command.** Don't just read command output embedded in a writeup — run the commands yourself and compare results. Small environmental differences often surface important learning moments.
+- **Keep a personal notes file.** Maintain a running document of techniques, one-liners, and tool flags you encounter. Your notes will become your most valuable CTF resource over time.
+- **Don't skip the easy challenges.** Beginner-tier writeups often introduce tool usage and thought processes that underpin much harder challenges in the same category.
+
+## FAQ
+
+<Accordion title="Can I practice without access to the original challenge?">
+  Yes. Many CTF platforms archive past competitions with their original infrastructure still running. Check [CTFtime.org](https://ctftime.org) for links to archived events, and platforms like [PicoCTF](https://picoctf.org), [HackTheBox](https://www.hackthebox.com), and [pwn.college](https://pwn.college) host permanent challenge libraries that cover the same vulnerability classes. Where a challenge is no longer hosted remotely, writeups here include the original binary or source files so you can run the service locally using Docker or a simple listener.
+</Accordion>
+
+<Accordion title="Are flags redacted in the writeups?">
+  Real competition flags are shown in full throughout these writeups. Since competitions are over by the time writeups are published, there is no scoring risk in displaying them. Seeing the complete flag helps you verify that your own reproduction was successful and confirms the correct submission format.
+</Accordion>
+
+<Accordion title="What tools do I need to follow along?">
+  Requirements vary by category. Web writeups typically use Burp Suite, curl, and a browser with developer tools. Cryptography writeups use Python with the `pycryptodome` library and occasionally SageMath. Binary exploitation writeups use GDB with the PEDA or pwndbg extension, pwntools, and Ghidra or IDA Free for disassembly. Forensics writeups draw on Wireshark, Volatility, binwalk, and steghide. The [Setup Guide](/setup/environment) walks you through installing all of these.
+</Accordion>
+
+<Accordion title="The exploit in the writeup doesn't work for me. What should I check?">
+  First, confirm that your tool versions match those noted in the writeup — pwntools and libc versions in particular can change exploit offsets. Second, check whether the remote service is still online; competition infrastructure is sometimes taken down after an event. Third, if you're running a local binary, make sure ASLR, stack canaries, and NX are configured to match the challenge environment (the writeup's reconnaissance section will document these). If you're still stuck, open an issue on the site's GitHub repository with your error output.
+</Accordion>
+
+<Accordion title="Can I use these writeups for teaching or presentations?">
+  Absolutely. All content on this site is published under a Creative Commons Attribution license. You're welcome to use writeups in workshops, university courses, or conference talks as long as you credit the source. Linking back to the original writeup page is the easiest way to do that.
+</Accordion>

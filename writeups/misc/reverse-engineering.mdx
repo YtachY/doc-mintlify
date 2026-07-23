@@ -1,0 +1,239 @@
+---
+title: "Reverse Engineering CTF Writeup: Analyzing Binaries"
+sidebarTitle: "Reverse Engineering"
+description: "Reverse engineering CTF walkthrough: decompile binaries with Ghidra, analyze logic with GDB, patch checks, and extract flags from obfuscated programs."
+---
+
+Reverse engineering challenges give you a compiled binary and ask you to figure out what it does — and more specifically, to make it give you the flag. You won't have source code. You'll work from assembly output, decompiler pseudocode, and runtime observation to reconstruct the author's logic. These challenges reward patience and systematic thinking over any single flashy technique. The goal is never to understand _every_ instruction in the binary; it's to understand _just enough_ to extract the flag or satisfy the check.
+
+## Challenge Setup
+
+In a typical reverse engineering CTF challenge, you receive a compiled ELF binary (Linux) or PE executable (Windows) that behaves like a password checker: it prompts for input, validates it against some internal logic, and either prints the flag or rejects you. Your job is to determine the correct input — or to bypass the check entirely.
+
+Before writing a single line of code or opening Ghidra, gather basic information about the file.
+
+```bash
+file challenge
+strings challenge | grep -i flag
+strings challenge | grep -E "CTF|flag\{|passwd"
+chmod +x challenge && ./challenge
+```
+
+`file` tells you the architecture (x86, x86-64, ARM), linking type (static or dynamic), and whether the binary has been stripped of debug symbols. `strings` often surfaces hardcoded flags, error messages, and function names that immediately suggest where to look next. Running the binary itself shows you the interface — what input it expects and how it responds.
+
+## Analysis Workflow
+
+<Steps>
+  <Step title="Identify the binary type and gather static strings">
+    Start with the broadest tools before drilling down. Run `file` and `strings` to establish the basics, then use `checksec` to understand what mitigations are in place.
+
+    ```bash
+    file challenge
+    strings -n 8 challenge
+    checksec --file=challenge
+    ```
+
+    Look in the `strings` output for anything that resembles a flag format, a password, a Base64 blob, or a telling error message like "Wrong password" or "Correct!". These strings anchor your analysis — find the code that uses them and work outward from there.
+
+    <Tip>
+    If the binary is packed or obfuscated, `strings` will return mostly garbage. Very short output or output dominated by random-looking byte sequences is a strong signal that the binary is UPX-packed or otherwise protected. Try `upx -d challenge` to decompress it before continuing.
+    </Tip>
+  </Step>
+
+  <Step title="Load the binary into Ghidra and find main">
+    Open Ghidra, create a new project, and import the binary. Let the auto-analysis run with default settings — this resolves function boundaries, identifies cross-references, and applies known library signatures.
+
+    Once analysis completes, open the **Symbol Tree** panel and navigate to `Functions`. Look for `main`, `entry`, or any function whose name contains "check", "verify", "validate", or "password". If the binary is stripped, navigate to the entry point and follow the call that takes the largest number of arguments — that's typically `main`.
+
+    In the **Decompiler** panel, Ghidra renders the selected function as readable C-like pseudocode. This is your primary working view. Read through `main` to understand the program's flow: where it reads input, what it calls to validate it, and what it does when validation succeeds.
+  </Step>
+
+  <Step title="Locate and analyze the flag check function">
+    Follow calls from `main` until you find the function that compares your input against the expected value. This function might use:
+
+    - `strcmp` or `strncmp` — direct string comparison against a hardcoded value
+    - A loop with XOR, addition, or rotation operations — a custom encoding scheme
+    - A series of individual character checks — each byte compared independently
+    - A hash comparison — your input is hashed and compared to a stored digest
+
+    In Ghidra's decompiler, rename variables as you understand them. Right-click a variable and select **Rename Variable** to change `local_38` to `user_input` and `local_20` to `expected_flag`. This makes the logic dramatically easier to follow as you work deeper into the function.
+
+    <Note>
+    Ghidra's decompiler occasionally misinterprets the size of data types or the structure of loops. When the pseudocode looks wrong, switch to the **Listing** view and read the raw assembly alongside it. The assembly is always authoritative.
+    </Note>
+  </Step>
+
+  <Step title="Set breakpoints and inspect values with GDB">
+    For anything that's easier to observe at runtime — the exact value being compared, the output of a transformation function, the contents of a register — switch to GDB.
+
+    ```bash
+    gdb -q ./challenge
+    (gdb) disas main
+    (gdb) break *0x401234
+    (gdb) run
+    (gdb) info registers
+    (gdb) x/s $rdi  # inspect string at register
+    (gdb) ni        # next instruction
+    ```
+
+    Set a breakpoint at the comparison instruction identified in Ghidra. When execution pauses, inspect the registers holding the two values being compared. On x86-64 Linux, `strcmp(a, b)` passes `a` in `rdi` and `b` in `rsi`. Examine both:
+
+    ```bash
+    (gdb) x/s $rdi
+    (gdb) x/s $rsi
+    ```
+
+    One of those strings is the expected password or an intermediate transformed value. If it prints directly as a readable string, you've found the flag. If it looks like encoded bytes, note the values and proceed to the Python re-implementation step.
+  </Step>
+
+  <Step title="Re-implement the algorithm in Python">
+    Once you understand the encoding or transformation the binary applies to your input, re-implement it in Python to recover the flag from the encoded ciphertext stored in the binary.
+
+    ```python
+    # After reversing the check function in Ghidra:
+    # flag[i] = input[i] XOR 0x42 + i
+
+    ciphertext = [0x66, 0x6c, 0x61, 0x67, 0x7b, ...]  # extracted from binary
+
+    flag = ''
+    for i, c in enumerate(ciphertext):
+        flag += chr((c - i) ^ 0x42)
+    print(flag)
+    ```
+
+    Extract the encoded byte array from Ghidra's listing view or from the binary directly using Python's `open(..., 'rb')`. Run the script and check whether the output matches the expected flag format. If it's close but garbled, double-check the order of operations — XOR and arithmetic precedence in the decompiler pseudocode are common sources of off-by-one errors.
+  </Step>
+
+  <Step title="Patch the binary to bypass the check">
+    If re-implementing the algorithm is proving difficult, consider patching the binary instead. The goal is to flip the conditional jump after the comparison so the program always takes the "success" branch regardless of your input.
+
+    ```python
+    with open('challenge', 'rb') as f:
+        data = bytearray(f.read())
+
+    # Patch je (0x74) to jne (0x75) at offset to bypass check
+    data[0x1234] = 0xeb  # jmp (unconditional)
+
+    with open('challenge_patched', 'wb') as f:
+        f.write(data)
+    ```
+
+    Find the offset of the conditional jump instruction using Ghidra (right-click the instruction → **Copy Special** → **Byte Offset**) or by searching for the instruction bytes with `grep` on a hex dump. Common patches:
+    - `0x74` (`je`) → `0x75` (`jne`) — invert the condition
+    - `0x74` (`je`) → `0xeb` (`jmp`) — make the jump unconditional
+    - `0x75` (`jne`) → `0x74` (`je`) — invert in the other direction
+
+    After patching, run `chmod +x challenge_patched && ./challenge_patched` and provide any input. If the patch is correct, the binary prints the flag.
+
+    <Warning>
+    Some binaries verify their own integrity or check that they haven't been modified. If your patched binary crashes or behaves unexpectedly, check for self-modifying code or integrity checks in the Ghidra listing — look for calls to functions that hash the binary's own `.text` section.
+    </Warning>
+  </Step>
+</Steps>
+
+## Static vs Dynamic Analysis
+
+Both analysis modes are essential. Use them together — static analysis gives you the map, dynamic analysis confirms what's actually happening at runtime.
+
+<Tabs>
+  <Tab title="Static Analysis">
+    Static analysis means examining the binary without running it. Your primary tools are `strings`, `objdump`, and Ghidra.
+
+    **Ghidra workflow:**
+    1. Import the binary and run auto-analysis with default settings
+    2. Use the **Symbol Tree** to navigate to known function names
+    3. Use **Search → Memory** (Ctrl+S) to find string literals and byte patterns
+    4. Use **References → Show References To** (Ctrl+Shift+F) to trace where a string or function is used
+    5. Rename variables and functions as you understand them — this is the single most effective way to accelerate static analysis
+
+    **`objdump` for quick disassembly:**
+    ```bash
+    objdump -d challenge | less
+    objdump -d challenge | grep -A 20 "<main>"
+    ```
+
+    **Extracting embedded byte arrays:**
+    ```bash
+    # Find offset and length from Ghidra, then extract with dd
+    dd if=challenge bs=1 skip=$((0x3010)) count=32 | xxd
+    ```
+
+    Static analysis is safe, fast, and works on any binary regardless of how it behaves at runtime. It's your starting point for every challenge.
+  </Tab>
+  <Tab title="Dynamic Analysis">
+    Dynamic analysis means running the binary and observing its behavior — register values, memory contents, system calls, and control flow at specific moments during execution.
+
+    **GDB with GEF or pwndbg:**
+
+    Install [GEF](https://github.com/hugsy/gef) or [pwndbg](https://github.com/pwndbg/pwndbg) to add a significantly improved TUI to GDB. Both provide automatic context display (registers, stack, disassembly) on every step.
+
+    ```bash
+    gdb -q ./challenge
+    (gdb) disas main
+    (gdb) break *0x401234
+    (gdb) run
+    (gdb) info registers
+    (gdb) x/s $rdi  # inspect string at register
+    (gdb) ni        # next instruction
+    ```
+
+    **Key GDB techniques for CTF RE:**
+    - Use `catch syscall` to pause on system calls like `read`, `write`, and `open`
+    - Use `watch *address` to pause whenever a specific memory location is written
+    - Use `set {int}address = value` to modify memory at runtime — useful for bypassing checks without patching the file
+    - Use `finish` to run until the current function returns and inspect the return value in `$rax`
+
+    **`ltrace` and `strace` for quick wins:**
+    ```bash
+    ltrace ./challenge        # intercepts library calls (strcmp, strlen, etc.)
+    strace ./challenge        # intercepts system calls
+    ltrace -s 200 ./challenge # increase string length limit for ltrace output
+    ```
+
+    `ltrace` frequently reveals the arguments to `strcmp` directly in its output — a one-command solve for simple password-check challenges.
+
+    <Tip>
+    Run `ltrace` before opening Ghidra. If the binary calls `strcmp` with two readable strings, you have the password in seconds. Save Ghidra for when the simple approaches don't work.
+    </Tip>
+  </Tab>
+</Tabs>
+
+## Recognizing Common Check Patterns
+
+After reversing enough binaries, you'll start recognizing recurring patterns in how flag checks are implemented.
+
+| Pattern | What it looks like in Ghidra | Approach |
+|---|---|---|
+| Direct `strcmp` | `if (strcmp(input, "flag{...}") != 0)` | Read the hardcoded string |
+| XOR encoding | Loop with `input[i] ^ key` | Extract key and ciphertext, reverse in Python |
+| Byte-by-byte comparison | `if (input[0] != 0x66) goto fail;` repeated | Collect each expected byte manually |
+| Hash comparison | `MD5(input)` compared to stored digest | Hashcat or CrackStation if weak hash |
+| Custom base encoding | Lookup table transformation | Reconstruct the alphabet, decode |
+
+## Tools Reference
+
+<Accordion title="Reverse Engineering Tools Cheat Sheet">
+  **Disassemblers and Decompilers**
+  - [Ghidra](https://ghidra-sre.org) — free, open-source, excellent decompiler; NSA-developed
+  - [IDA Free](https://hex-rays.com/ida-free/) — industry-standard disassembler; free tier covers most CTF binaries
+  - [Binary Ninja](https://binary.ninja) — commercial; cloud version available free for CTF use
+  - `objdump -d` — quick command-line disassembly for orientation
+
+  **Dynamic Analysis**
+  - `gdb` with [GEF](https://github.com/hugsy/gef) or [pwndbg](https://github.com/pwndbg/pwndbg) — enhanced debugger TUI
+  - `ltrace` — intercepts shared library calls at runtime
+  - `strace` — intercepts system calls at runtime
+  - [x64dbg](https://x64dbg.com) — Windows GUI debugger
+
+  **File Inspection**
+  - `file` — identify binary type, architecture, and linking
+  - `strings` — extract printable strings from any binary
+  - `checksec` — report enabled binary mitigations (PIE, NX, canaries)
+  - `exiftool` — metadata extraction for non-ELF file types
+  - `binwalk` — detect and extract embedded files within a binary
+
+  **Scripting and Automation**
+  - [pwntools](https://github.com/Gallopsled/pwntools) — Python library for interacting with processes and remote services
+  - [angr](https://angr.io) — binary analysis framework with symbolic execution for automated flag finding
+  - [Frida](https://frida.re) — dynamic instrumentation toolkit; hook and modify function behavior at runtime
+</Accordion>

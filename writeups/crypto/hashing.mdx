@@ -1,0 +1,340 @@
+---
+title: "Hash Cracking CTF Writeup: MD5, SHA, and Length Extension"
+sidebarTitle: "Hashing"
+description: "Hash-based CTF challenge walkthrough: crack MD5/SHA hashes with hashcat and John the Ripper, exploit hash length extension attacks, and bypass hash comparisons."
+---
+
+Hash challenges in CTFs come in two distinct flavours. The first is pure cracking: you're given a hash digest and you need to find the original input, usually a password or short string. The second is exploitation: the application uses a hash as a security primitive — a MAC, a signature, or an authentication token — and there's a structural flaw in how it was constructed. Both categories appear constantly, and your approach to each is completely different. This walkthrough covers the full spectrum, from firing up `hashcat` to crafting a length extension payload against a server-side MAC.
+
+## Step 1: Identify the Hash Algorithm
+
+The first thing you do with any unknown hash is figure out what algorithm produced it. Hash length and character set narrow it down quickly, and `hashid` confirms it.
+
+<Steps>
+  <Step title="Check the Hash Length and Format">
+    Most common hash algorithms produce output of a fixed, recognizable length:
+
+    | Algorithm | Output length (hex chars) | Output length (bytes) |
+    |---|---|---|
+    | MD5 | 32 | 16 |
+    | SHA-1 | 40 | 20 |
+    | SHA-224 | 56 | 28 |
+    | SHA-256 | 64 | 32 |
+    | SHA-384 | 96 | 48 |
+    | SHA-512 | 128 | 64 |
+    | bcrypt | 60 (starts with `$2b$`) | — |
+    | NTLM | 32 | 16 |
+
+    If the hash starts with `$2b$`, `$2a$`, or `$2y$`, it's bcrypt. If it's 32 hex characters, it could be MD5 or NTLM — context usually disambiguates.
+  </Step>
+
+  <Step title="Run hashid">
+    `hashid` analyses the hash format and returns a ranked list of likely algorithms. Give it the hash directly or point it at a file.
+
+    ```bash
+    # Identify a single hash
+    hashid 'd41d8cd98f00b204e9800998ecf8427e'
+
+    # Identify all hashes in a file and show hashcat mode numbers
+    hashid -m hashes.txt
+    ```
+
+    The `-m` flag prints the hashcat mode alongside each algorithm name, which saves you from looking it up separately.
+  </Step>
+
+  <Step title="Try Online Lookups First">
+    Before spending GPU time cracking, check [crackstation.net](https://crackstation.net) and [hashes.com](https://hashes.com). These sites maintain rainbow tables of billions of pre-computed hashes. Many CTF flags and challenge passwords appear immediately.
+
+    ```bash
+    # You can also query crackstation programmatically
+    curl -s "https://crackstation.net/crackstation.htm" \
+         --data "hash=d41d8cd98f00b204e9800998ecf8427e&submit=Crack+Hashes"
+    ```
+  </Step>
+</Steps>
+
+## Step 2: Crack with hashcat
+
+`hashcat` is the fastest hash cracking tool available and handles virtually every algorithm you'll encounter in a CTF. It runs on the GPU by default, which makes it orders of magnitude faster than CPU-based tools for most algorithms.
+
+<CodeGroup>
+
+```bash Wordlist attack (dictionary)
+# Crack MD5 hashes in hash.txt against rockyou.txt
+hashcat -m 0 -a 0 hash.txt /usr/share/wordlists/rockyou.txt
+
+# SHA-256 with rules (best64 applies common mutations: l33tspeak, capitalisation, etc.)
+hashcat -m 1400 -a 0 hash.txt rockyou.txt -r /usr/share/hashcat/rules/best64.rule
+
+# SHA-1
+hashcat -m 100 -a 0 hash.txt rockyou.txt
+```
+
+```bash Brute-force / mask attack
+# MD5, 6-character lowercase alphabetic
+hashcat -m 0 -a 3 hash.txt '?l?l?l?l?l?l'
+
+# All printable ASCII, up to 6 characters
+hashcat -m 0 -a 3 hash.txt '?a?a?a?a?a?a'
+
+# Known prefix "CTF{" + 4 lowercase letters + "}"
+hashcat -m 0 -a 3 hash.txt 'CTF{?l?l?l?l}'
+```
+
+```bash Combination and hybrid attacks
+# Combine two wordlists (word1 + word2)
+hashcat -m 0 -a 1 hash.txt wordlist1.txt wordlist2.txt
+
+# Hybrid: wordlist + mask appended (e.g., password + 4 digits)
+hashcat -m 0 -a 6 hash.txt rockyou.txt '?d?d?d?d'
+```
+
+</CodeGroup>
+
+### hashcat Mode Reference
+
+<Accordion title="Common hashcat mode numbers">
+  | Mode | Algorithm |
+  |---|---|
+  | `0` | MD5 |
+  | `100` | SHA-1 |
+  | `1400` | SHA-256 |
+  | `1700` | SHA-512 |
+  | `1800` | sha512crypt (Linux `/etc/shadow`) |
+  | `3200` | bcrypt |
+  | `1000` | NTLM |
+  | `2500` | WPA-PMKID |
+  | `13100` | Kerberos 5 TGS (etype 23) |
+
+  Run `hashcat --help | grep -i sha` to search for a specific algorithm by name.
+</Accordion>
+
+<Tip>
+  Use the `--show` flag after a session completes to print all cracked hashes without re-running the attack: `hashcat -m 0 hash.txt --show`. Results are saved to `hashcat.potfile` automatically.
+</Tip>
+
+## Step 3: Crack with John the Ripper
+
+John the Ripper (`john`) is more flexible than hashcat in some scenarios — it auto-detects many hash formats, handles complex file formats (ZIP, PDF, SSH keys) out of the box, and works well on CPU when a GPU isn't available.
+
+```bash
+# Auto-detect format and crack with rockyou.txt
+john --wordlist=/usr/share/wordlists/rockyou.txt hash.txt
+
+# Force a specific format (use --list=formats to see all options)
+john --wordlist=/usr/share/wordlists/rockyou.txt --format=raw-md5 hash.txt
+john --wordlist=/usr/share/wordlists/rockyou.txt --format=raw-sha256 hash.txt
+
+# Brute-force with incremental mode
+john --incremental hash.txt
+
+# Show cracked passwords
+john --show hash.txt
+
+# Extract a hash from a protected ZIP and crack it
+zip2john protected.zip > zip.hash
+john --wordlist=rockyou.txt zip.hash
+```
+
+<Accordion title="John format names for common algorithms">
+  | Algorithm | John format flag |
+  |---|---|
+  | MD5 | `--format=raw-md5` |
+  | SHA-1 | `--format=raw-sha1` |
+  | SHA-256 | `--format=raw-sha256` |
+  | SHA-512 | `--format=raw-sha512` |
+  | bcrypt | `--format=bcrypt` |
+  | NTLM | `--format=nt` |
+  | MD5crypt (Linux) | `--format=md5crypt` |
+</Accordion>
+
+## Step 4: Hash Length Extension Attack
+
+This is the most technically interesting hash attack you'll encounter in CTFs. Many applications compute a MAC like this:
+
+```
+MAC = H(secret || message)
+```
+
+Where `H` is a Merkle–Damgård hash function (MD5, SHA-1, or SHA-256), `secret` is a server-side key, and `message` is attacker-controlled. The flaw: you can append extra data to `message` and compute a valid MAC for the extended message — **without knowing `secret`**.
+
+### Why It Works
+
+Merkle–Damgård hashes process input in blocks. After all blocks are processed, the internal state *is* the hash output. If you resume hashing from that state, you continue as if you were still hashing the same stream — including the secret you never saw.
+
+<Steps>
+  <Step title="Confirm the Vulnerability">
+    Look for a server endpoint that accepts a `(message, mac)` pair and validates it as `mac == H(secret || message)`. The hash algorithm must be MD5, SHA-1, or SHA-256 (all Merkle–Damgård constructions). SHA-3 and HMAC are **not** vulnerable.
+  </Step>
+
+  <Step title="Automate with hash_extender">
+    `hash_extender` handles all the padding calculation and state manipulation for you. You need: the original message, the known valid MAC, the data you want to append, and (if known) the secret length.
+
+    ```bash
+    # Basic usage: extend 'admin' with '&role=admin', secret length 16
+    hash_extender \
+      -d 'admin' \
+      -s 'aabbccddeeff00112233445566778899' \
+      -a '&role=admin' \
+      -l 16
+
+    # If you don't know the exact secret length, try a range
+    hash_extender \
+      -d 'admin' \
+      -s 'aabbccddeeff00112233445566778899' \
+      -a '&role=admin' \
+      --secret-min=8 \
+      --secret-max=32 \
+      --out-data-format=hex \
+      --table
+    ```
+
+    The tool outputs the new MAC and the new (URL-encoded) message to submit to the server.
+  </Step>
+
+  <Step title="Implement It in Python (Manual Approach)">
+    If `hash_extender` isn't available, you can implement length extension manually using a custom hash state loader.
+
+    ```python
+    import struct
+    import hashlib
+
+    def md5_padding(message_length: int) -> bytes:
+        """Compute the PKCS MD5 padding for a message of `message_length` bytes."""
+        padding = b'\x80'
+        padding += b'\x00' * ((55 - message_length) % 64)
+        # Append original bit length as 64-bit little-endian
+        padding += struct.pack('<Q', message_length * 8)
+        return padding
+
+    def length_extension_md5(original_mac_hex: str, original_msg: bytes,
+                              append_data: bytes, secret_len: int) -> tuple:
+        """
+        Return (new_mac_hex, new_message) for a length extension attack.
+        new_message is what you send to the server as the 'message' field.
+        """
+        # The forged message = original_msg + padding + append_data
+        padded_original_len = secret_len + len(original_msg)
+        padding = md5_padding(padded_original_len)
+        new_message = original_msg + padding + append_data
+
+        # Reconstruct MD5 state from the known MAC
+        mac_bytes = bytes.fromhex(original_mac_hex)
+        a, b, c, d = struct.unpack('<4I', mac_bytes)
+
+        # Resume MD5 from this state, processing only append_data
+        # (Use a library like `hlextend` or `pymd5` that supports custom init state)
+        # This is conceptual — hlextend handles the state injection:
+        import hlextend
+        h = hlextend.new('md5')
+        new_mac = h.extend(
+            append_data.decode(),
+            original_msg.decode(),
+            secret_len,
+            original_mac_hex
+        )
+        return new_mac, new_message
+
+    # In practice, use hlextend or hash_extender — they handle all edge cases
+    ```
+  </Step>
+</Steps>
+
+<Warning>
+  HMAC (`H(key || H(key || message))`) is specifically designed to prevent length extension. If the server uses `hmac.new(secret, message, hashlib.md5).hexdigest()`, this attack does not work. Length extension only applies to the naive `H(secret || message)` construction.
+</Warning>
+
+## Step 5: Hash Comparison Bypasses
+
+PHP and other loosely typed languages introduce their own class of hash vulnerabilities that have nothing to do with cracking.
+
+<Accordion title="PHP Magic Hash (Type Juggling)">
+  In PHP, the `==` operator performs type coercion. If a hash string looks like a float in scientific notation (`0e...`), PHP converts it to `0` before comparing. Two different inputs that produce hashes starting with `0e` followed only by digits will compare as equal.
+
+  ```php
+  // Vulnerable comparison
+  if (md5($_GET['password']) == $stored_hash) { ... }
+
+  // If stored_hash = "0e462097431906509019562988736854"
+  // Then any input whose MD5 also matches /^0e[0-9]+$/ bypasses the check
+  ```
+
+  ```python
+  # Find a "magic" MD5 hash (0e... format) by brute force
+  import hashlib, itertools, string
+
+  def find_magic_md5():
+      chars = string.ascii_letters + string.digits
+      for length in range(1, 8):
+          for combo in itertools.product(chars, repeat=length):
+              candidate = ''.join(combo)
+              h = hashlib.md5(candidate.encode()).hexdigest()
+              if h.startswith('0e') and h[2:].isdigit():
+                  print(f"Magic hash: {candidate} -> {h}")
+                  return candidate
+
+  # Known magic hashes (use these directly in CTFs):
+  # "240610708"  -> md5 = 0e462097431906509019562988736854
+  # "QNKCDZO"   -> md5 = 0e830400451993494058024219903391
+  # "aabg74469"  -> sha1 = 0e00910840285373189535044251390$
+  ```
+</Accordion>
+
+<Accordion title="Hash Collision (MD5 and SHA-1)">
+  MD5 and SHA-1 are both collision-broken. You can find two different inputs that produce the same hash. In CTF challenges, this sometimes means you upload two different files with the same hash to bypass an integrity check.
+
+  ```bash
+  # Generate an MD5 collision pair using fastcoll
+  fastcoll -o file1.bin file2.bin
+
+  # Verify: both files have the same MD5 but different content
+  md5sum file1.bin file2.bin
+  diff file1.bin file2.bin
+  ```
+
+  For SHA-1, use the [SHAttered](https://shattered.io) collision PDFs or `sha1collisiondetection`. Generating novel SHA-1 collisions requires significant compute, so CTF challenges that use SHA-1 collisions typically provide the collision pair and ask you to exploit the application.
+</Accordion>
+
+<Accordion title="Null Byte Truncation">
+  Some older implementations pass hashes through C-string functions that stop at null bytes (`\x00`). If you can include a null byte in your input, everything after it may be ignored.
+
+  ```python
+  # Attempt: if the backend uses strcmp or strncmp with a hash as a string
+  payload = b'admin\x00' + b'A' * 20  # null byte truncates at "admin"
+  ```
+
+  This is rare in modern challenges but appears in binary exploitation scenarios where a hash comparison lives inside native code.
+</Accordion>
+
+## Rainbow Table Lookups
+
+For unsalted MD5 and SHA-1 hashes of common strings, rainbow tables give you instant results. Use these resources before running `hashcat`:
+
+```bash
+# Online rainbow table lookups
+# https://crackstation.net  — large free lookup (15 billion+ entries)
+# https://hashes.com        — community-contributed cracked hashes
+# https://md5decrypt.net    — MD5 and SHA-1 specific
+
+# Offline: generate rainbow tables with rtgen (RainbowCrack suite)
+rtgen md5 loweralpha-numeric 1 7 0 3800 33554432 0
+rtsort *.rt
+rcrack . -h d41d8cd98f00b204e9800998ecf8427e
+```
+
+<Note>
+  Salted hashes completely defeat rainbow tables. If the hash was computed as `H(salt || password)` with a unique per-user salt, you must crack it directly with hashcat or John using the salt as part of the hash format. Always check whether the challenge provides a salt alongside the hash.
+</Note>
+
+## Quick Reference
+
+| Goal | Tool | Command sketch |
+|---|---|---|
+| Identify hash type | `hashid` | `hashid -m <hash>` |
+| Online lookup | CrackStation | paste hash at crackstation.net |
+| Dictionary crack (MD5) | hashcat | `hashcat -m 0 -a 0 hash.txt rockyou.txt` |
+| Brute-force crack | hashcat | `hashcat -m 0 -a 3 hash.txt '?a?a?a?a?a?a'` |
+| Auto-detect and crack | John | `john --wordlist=rockyou.txt hash.txt` |
+| Length extension | hash_extender | `hash_extender -d msg -s mac -a extra -l keylen` |
+| PHP type juggling | Manual | Use known magic hash strings |
+| MD5 collision | fastcoll | `fastcoll -o f1.bin f2.bin` |

